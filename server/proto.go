@@ -47,6 +47,7 @@ const (
 	EvFlightToggle
 	EvStreakBuff
 	EvRevenge
+	EvBondEvent
 )
 
 type Event struct {
@@ -195,6 +196,14 @@ func Events(evts []Event) []byte {
 			w.U16(e.Ms)
 		case EvRevenge:
 			w.U16(e.Player)
+			nb := safeNameBytes(e.Name)
+			w.U8(uint8(len(nb)))
+			w.b = append(w.b, nb...)
+		case EvBondEvent:
+			w.U16(e.Player)
+			w.U16(e.Victim)
+			w.U8(e.Kind)
+			w.U8(e.Dmg)
 			nb := safeNameBytes(e.Name)
 			w.U8(uint8(len(nb)))
 			w.b = append(w.b, nb...)

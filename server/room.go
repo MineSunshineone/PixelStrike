@@ -35,6 +35,12 @@ func NewRoom(id int, w *World, s *Store) *Room {
 func (r *Room) Remove(p *Player) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Clear bond: if this player had a bond mate, break the bond
+	if p.BondMate != 0 {
+		if mate := r.findPlayer(p.BondMate); mate != nil {
+			mate.BondMate = 0
+		}
+	}
 	for i, q := range r.Players {
 		if q == p {
 			r.Players = append(r.Players[:i], r.Players[i+1:]...)
@@ -177,7 +183,7 @@ func (r *Room) eventsFor(target *Player, evts []Event) []Event {
 	for _, e := range evts {
 		send := false
 		switch e.Type {
-		case EvKill, EvPlayerName, EvPlayerLeave, EvFlightToggle, EvRevenge:
+		case EvKill, EvPlayerName, EvPlayerLeave, EvFlightToggle, EvRevenge, EvBondEvent:
 			send = true
 		case EvStreakBuff:
 			send = e.Player == target.Id
