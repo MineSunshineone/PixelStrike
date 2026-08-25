@@ -28,23 +28,24 @@ type WeaponDef struct {
 }
 
 var Weapons = []WeaponDef{
-	{0, "Glock-18", 21, 3.0, 480, .24, 1.05, .09, 1.0, .58, 30, 180, 1400, false, 1},
-	{1, "Desert Eagle", 44, 2.45, 250, .14, 1.65, .30, .98, .93, 11, 53, 1800, false, 1},
-	{2, "MP5-SD", 21, 3.0, 820, .34, 1.15, .05, 1.0, .65, 45, 180, 1800, true, 1},
-	{3, "AK-47", 33, 4.0, 600, .26, 1.6, .14, .92, .78, 45, 135, 2200, true, 1},
-	{4, "M4A4", 29, 3.5, 690, .20, 1.35, .09, .93, .72, 45, 135, 2100, true, 1},
-	{5, "AWP", 103, 1.25, 32, .015, 4.4, 0, .76, .98, 8, 45, 2800, false, 1},
+	{0, "Glock-18", 23, 3.0, 500, .42, 1.15, .10, 1.0, .58, 30, 180, 1400, false, 1},
+	{1, "Desert Eagle", 44, 2.45, 250, .32, 1.80, .30, .98, .93, 11, 53, 1800, false, 1},
+	{2, "MP5-SD", 22, 3.0, 820, .52, 1.25, .07, 1.0, .65, 45, 180, 1800, true, 1},
+	{3, "AK-47", 33, 4.0, 600, .50, 1.70, .16, .92, .78, 45, 135, 2200, true, 1},
+	{4, "M4A4", 29, 3.5, 690, .38, 1.40, .10, .93, .72, 45, 135, 2100, true, 1},
+	{5, "AWP", 103, 1.25, 32, .06, 4.4, 0, .76, .98, 8, 45, 2800, false, 1},
 	{6, "Knife", 34, 1, 150, 0, 0, 0, 1.08, 1, 0, 0, 0, false, 1},
-	{7, "USP-S", 24, 3.6, 400, .11, 1.0, .16, 1.0, .62, 18, 36, 1700, false, 1},
-	{8, "UMP-45", 25, 2.8, 620, .42, 1.25, .08, .97, .70, 38, 150, 2100, true, 1},
-	{9, "FAMAS", 28, 3.2, 720, .28, 1.45, .11, .94, .68, 38, 135, 2200, true, 1},
-	{10, "AUG", 27, 3.5, 600, .16, 1.1, .08, .88, .75, 45, 135, 2300, true, 1},
-	{11, "SSG 08", 72, 2.0, 48, .025, 3.4, 0, .80, .82, 12, 120, 2600, false, 1},
-	{12, "XM1014", 14, 1.25, 180, 2.6, 3.6, .28, .93, .62, 8, 36, 2600, false, 6},
+	{7, "USP-S", 24, 3.6, 400, .30, 1.05, .16, 1.0, .62, 18, 36, 1700, false, 1},
+	{8, "UMP-45", 27, 2.8, 620, .56, 1.30, .08, .97, .72, 38, 150, 2100, true, 1},
+	{9, "FAMAS", 29, 3.2, 720, .42, 1.40, .12, .94, .68, 38, 135, 2200, true, 1},
+	{10, "AUG", 27, 3.5, 600, .32, 1.15, .09, .88, .75, 45, 135, 2300, true, 1},
+	{11, "SSG 08", 72, 2.0, 48, .08, 3.4, 0, .80, .82, 12, 120, 2600, false, 1},
+	{12, "XM1014", 17, 1.2, 200, 1.85, 2.4, .10, .96, .70, 7, 32, 2100, true, 8},
 }
 
-func isGun(id uint8) bool    { return int(id) < len(Weapons) && id != 6 }
-func isSniper(id uint8) bool { return id == 5 || id == 11 }
+func isGun(id uint8) bool      { return int(id) < len(Weapons) && id != 6 }
+func isSniper(id uint8) bool   { return id == 5 || id == 11 }
+func isShotgun(id uint8) bool  { return id == 12 }
 func isPrimary(id uint8) bool {
 	switch id {
 	case 2, 3, 4, 5, 8, 9, 10, 11, 12:
@@ -93,7 +94,8 @@ type PlayerState struct {
 	CmdKeys                                                        uint8
 	Reloading                                                      bool
 	ReloadEnd, NextFire, InvincibleUntil, RespawnAt, NextGrenadeAt time.Time
-	LandingUntil, AimStarted, SpeedUntil                           time.Time
+	LandingUntil, AimStarted, SpeedUntil, DmgUntil, RecoilUntil    time.Time
+	Streak                                                         uint8
 	Grenades                                                       int
 	Kills, Deaths                                                  uint16
 	LastInputSeq, LastShotSeq                                      uint16
@@ -235,7 +237,7 @@ func (r *Room) Move(p *PlayerState, now time.Time) {
 	}
 	speed := WalkSpeed * Weapons[min(int(p.Weapon), len(Weapons)-1)].SpeedMult
 	if now.Before(p.SpeedUntil) {
-		speed *= speedBoostMultiplier
+		speed *= p.streakSpeedMul()
 	}
 	if p.Crouch {
 		speed *= CrouchSpeed
@@ -373,7 +375,11 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 	for n := 0; n < pellets; n++ {
 		shotDir := dir
 		if isGun(uint8(weapon)) {
-			shotDir = patternDir(dir, spread, spreadSample(shotSeq, pellets, n), weapon, p.Id)
+			if isShotgun(uint8(weapon)) {
+				shotDir = shotgunDir(dir, spread, n, int(uint8(shotSeq)), weapon, p.Id)
+			} else {
+				shotDir = patternDir(dir, spread, spreadSample(shotSeq, pellets, n), weapon, p.Id)
+			}
 		}
 		_, worldDist := r.World.Raycast(origin, shotDir, maxDist)
 		var target *PlayerState
@@ -408,20 +414,31 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 			}
 		} else if headshot {
 			dmg *= def.HeadMult
-		} else if hitY <= .65 {
+		} else if hitY <= .65 && !isShotgun(uint8(weapon)) {
 			dmg *= .75
+		}
+		if isShotgun(uint8(weapon)) && targetDist > 8 {
+			dmg *= math.Max(0.38, 1-(targetDist-8)/16)
 		}
 		r.Damage(p, target, dmg, headshot, uint8(weapon), now)
 		if !target.Alive && pellets == 1 {
 			break
 		}
 	}
+	hear := 38.0
+	if weapon == 6 {
+		hear = 14
+	}
+	r.alertBotsSound(origin, p, now, hear)
 	return true
 }
 
 func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool, weapon uint8, now time.Time) {
 	if !victim.Alive || victim.ProtectedAt(now) {
 		return
+	}
+	if now.Before(attacker.DmgUntil) {
+		dmg *= attacker.streakDamageMul()
 	}
 	actual := dmg
 	if victim.Armor > 0 && isGun(weapon) {
@@ -437,11 +454,21 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	}
 	r.Emit(Event{Type: EvHit, Player: attacker.Id, Victim: victim.Id, Dmg: d, Headshot: hs})
 	if victim.HP > 0 {
+		r.botTookHit(victim, attacker, now)
 		return
 	}
+	r.botKilled(victim, attacker, now)
 	r.Emit(Event{Type: EvKill, Killer: attacker.Id, Victim: victim.Id, Weapon: weapon, Headshot: hs})
 	attacker.Kills++
 	victim.Deaths++
+	if attacker.Id != victim.Id {
+		if attacker.Streak < 255 {
+			attacker.Streak++
+		}
+		r.applyStreakReward(attacker, now)
+	}
+	victim.Streak = 0
+	victim.DmgUntil, victim.RecoilUntil, victim.SpeedUntil = time.Time{}, time.Time{}, time.Time{}
 	if !attacker.IsBot {
 		r.Store.Accumulate(attacker.Account, 1, 0)
 		if !victim.IsBot && isGun(weapon) {
@@ -453,6 +480,178 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	}
 	victim.Alive, victim.Reloading = false, false
 	victim.RespawnAt = now.Add(RespawnDelayS)
+}
+
+func (p *PlayerState) streakScale() int {
+	return min(int(p.Streak), streakScaleCap)
+}
+
+func (p *PlayerState) streakDamageMul() float64 {
+	return math.Min(streakDmgCap, 1.16+0.03*float64(p.streakScale()))
+}
+
+func (p *PlayerState) streakSpeedMul() float64 {
+	return math.Min(streakSpeedCap, 1.30+0.02*float64(p.streakScale()))
+}
+
+func (p *PlayerState) grantStreakAmmo() {
+	ids := [2]uint8{p.Primary, p.Secondary}
+	for i, id := range ids {
+		if int(id) >= len(Weapons) {
+			continue
+		}
+		def := Weapons[id]
+		add := max(def.Mag/2, 5)
+		space := def.Mag - p.Mags[i]
+		if space > 0 {
+			take := min(space, add)
+			p.Mags[i] += take
+			add -= take
+		}
+		p.Reserves[i] = min(def.Reserve, p.Reserves[i]+add)
+	}
+}
+
+type streakNeed struct {
+	kind  uint8
+	score int
+}
+
+func (p *PlayerState) streakNeeds(now time.Time) []streakNeed {
+	needs := make([]streakNeed, 0, 5)
+	if s := p.healPressure(); s > 0 {
+		needs = append(needs, streakNeed{StreakHeal, s})
+	}
+	if s := p.ammoPressure(); s > 0 {
+		needs = append(needs, streakNeed{StreakAmmo, s})
+	}
+	if now.After(p.SpeedUntil) || p.SpeedUntil.Sub(now) < 3*time.Second {
+		needs = append(needs, streakNeed{StreakSpeed, 28})
+	}
+	if (now.After(p.RecoilUntil) || p.RecoilUntil.Sub(now) < 3*time.Second) && isGun(p.Weapon) && !isSniper(p.Weapon) {
+		needs = append(needs, streakNeed{StreakRecoil, 32})
+	}
+	if now.After(p.DmgUntil) || p.DmgUntil.Sub(now) < 3*time.Second {
+		needs = append(needs, streakNeed{StreakDamage, 26})
+	}
+	return needs
+}
+
+func (p *PlayerState) healPressure() int {
+	if p.HP <= 25 {
+		return 120
+	}
+	if p.HP <= 45 {
+		return 95
+	}
+	if p.HP <= 70 {
+		return 58
+	}
+	if p.HP < MaxHP {
+		return 22
+	}
+	if p.Armor <= 15 {
+		return 42
+	}
+	if p.Armor <= 40 {
+		return 24
+	}
+	return 0
+}
+
+func (p *PlayerState) ammoPressure() int {
+	best := 0
+	ids := [2]uint8{p.Primary, p.Secondary}
+	for i, id := range ids {
+		if int(id) >= len(Weapons) {
+			continue
+		}
+		def := Weapons[id]
+		if def.Mag <= 0 {
+			continue
+		}
+		mag, res := p.Mags[i], p.Reserves[i]
+		score := 0
+		if mag == 0 && res == 0 {
+			score = 100
+		} else if mag == 0 {
+			score = 82
+		} else if mag*100/def.Mag <= 20 {
+			score = 68
+		} else if mag*100/def.Mag <= 40 {
+			score = 40
+		} else if res*100/max(def.Reserve, 1) <= 20 {
+			score = 22
+		}
+		if p.ActiveSlot == uint8(i+1) && score > 0 {
+			score += 12
+		}
+		if score > best {
+			best = score
+		}
+	}
+	return best
+}
+
+func (r *Room) applyStreakReward(p *PlayerState, now time.Time) {
+	n := int(p.Streak)
+	if n < 2 {
+		return
+	}
+	needs := p.streakNeeds(now)
+	if len(needs) == 0 {
+		needs = []streakNeed{{StreakDamage, 1}}
+	}
+	for i := 1; i < len(needs); i++ {
+		for j := i; j > 0 && needs[j].score > needs[j-1].score; j-- {
+			needs[j], needs[j-1] = needs[j-1], needs[j]
+		}
+	}
+	picks := 1
+	if n >= 5 {
+		picks = 2
+	}
+	if n >= 8 {
+		picks = streakPickCap
+	}
+	if picks > len(needs) {
+		picks = len(needs)
+	}
+	kind := uint8(0)
+	n = min(n, streakScaleCap)
+	dur := min(streakDurationCap, time.Duration(6+n)*time.Second)
+	ms := uint16(dur / time.Millisecond)
+	healAmt := min(streakHealCap, 32+n*4)
+	for i := 0; i < picks; i++ {
+		if needs[i].score <= 0 && i > 0 {
+			break
+		}
+		switch needs[i].kind {
+		case StreakAmmo:
+			p.grantStreakAmmo()
+			kind |= StreakAmmo
+		case StreakHeal:
+			p.HP = uint8(min(MaxHP, int(p.HP)+healAmt))
+			p.Armor = uint8(min(100, int(p.Armor)+min(40, 15+n*4)))
+			kind |= StreakHeal
+		case StreakSpeed:
+			if now.Add(dur).After(p.SpeedUntil) {
+				p.SpeedUntil = now.Add(dur)
+			}
+			kind |= StreakSpeed
+		case StreakRecoil:
+			if now.Add(dur).After(p.RecoilUntil) {
+				p.RecoilUntil = now.Add(dur)
+			}
+			kind |= StreakRecoil
+		case StreakDamage:
+			if now.Add(dur).After(p.DmgUntil) {
+				p.DmgUntil = now.Add(dur)
+			}
+			kind |= StreakDamage
+		}
+	}
+	r.Emit(Event{Type: EvStreakBuff, Player: p.Id, Kind: kind, Dmg: p.Streak, Ms: ms})
 }
 
 func (r *Room) StartReload(p *PlayerState, now time.Time) bool {
@@ -496,7 +695,8 @@ func (r *Room) Respawn(p *PlayerState, now time.Time) {
 	p.ApplyLoadout(p.Primary, p.Secondary)
 	p.InvincibleUntil = now.Add(SpawnProtectS)
 	p.LandingUntil, p.AimStarted = time.Time{}, time.Time{}
-	p.SpeedUntil = time.Time{}
+	p.SpeedUntil, p.DmgUntil, p.RecoilUntil = time.Time{}, time.Time{}, time.Time{}
+	p.Streak = 0
 	p.RespawnAt = time.Time{}
 	r.Emit(Event{Type: EvRespawn, Player: p.Id, Origin: p.Pos})
 }
@@ -553,8 +753,19 @@ const (
 )
 
 const (
-	speedBoostDuration   = 8 * time.Second
-	speedBoostMultiplier = 1.35
+	speedBoostDuration     = 8 * time.Second
+	speedBoostMultiplier   = 1.35
+	streakDmgCap           = 1.35
+	streakSpeedCap         = 1.45
+	streakHealCap          = 55
+	streakDurationCap      = 10 * time.Second
+	streakScaleCap         = 8
+	streakPickCap          = 3
+	StreakAmmo           uint8 = 1
+	StreakHeal           uint8 = 2
+	StreakSpeed          uint8 = 4
+	StreakRecoil         uint8 = 8
+	StreakDamage         uint8 = 16
 )
 
 type Pickup struct {
@@ -791,20 +1002,40 @@ func AimDir(yaw, pitch float64) Vec3 {
 func weaponSpread(def WeaponDef, vx, vz float64, onGround, crouching, landing, aiming bool, burstShots int) float64 {
 	moveFactor := math.Min(1, math.Hypot(vx, vz)/3)
 	spread := def.SpreadDeg + (def.MoveSpreadDeg-def.SpreadDeg)*moveFactor
-	// Bloom used to dump the whole spray into a random cone, which made
-	// recoil unreadable. Keep a tiny residual so long sprays aren't lasers.
-	spread += math.Min(.22, float64(burstShots)*def.BloomDeg*.12)
+	spread += math.Min(.28, float64(burstShots)*def.BloomDeg*.14)
 	if !onGround {
 		spread = math.Max(spread, def.MoveSpreadDeg*1.55+.45)
 	}
 	if crouching {
-		spread *= .55
+		spread *= .72
 	}
 	if aiming && !isSniper(def.Id) {
-		spread *= .48
+		if isShotgun(def.Id) {
+			spread *= .85
+		} else {
+			spread *= .62
+		}
 	}
 	if landing {
 		spread = math.Max(spread, def.MoveSpreadDeg*1.12)
+	}
+	if isGun(def.Id) {
+		floor := 0.28
+		switch {
+		case isShotgun(def.Id):
+			floor = 1.25
+		case isSniper(def.Id):
+			if aiming {
+				floor = 0.07
+			} else {
+				floor = 0
+			}
+		case def.Id == 0 || def.Id == 1 || def.Id == 7:
+			floor = 0.22
+		}
+		if floor > 0 && spread < floor {
+			spread = floor
+		}
 	}
 	return spread
 }
@@ -829,6 +1060,35 @@ func patternDir(dir Vec3, deg float64, shot, weapon int, shooter uint16) Vec3 {
 	right := norm(cross(dir, Vec3{0, 1, 0}))
 	up := cross(right, dir)
 	a, b := math.Cos(angle)*radius, math.Sin(angle)*radius
+	return norm(Vec3{dir.X + right.X*a + up.X*b, dir.Y + right.Y*a + up.Y*b, dir.Z + right.Z*a + up.Z*b})
+}
+
+var xmPattern = [][2]float64{
+	{0.18, -0.12},
+	{1.00, 0.10},
+	{0.62, 0.78},
+	{-0.22, 0.98},
+	{-0.92, 0.38},
+	{-0.85, -0.52},
+	{-0.08, -1.00},
+	{0.78, -0.62},
+}
+
+func shotgunDir(dir Vec3, deg float64, pellet, shot, weapon int, shooter uint16) Vec3 {
+	if deg <= 0 {
+		return dir
+	}
+	o := xmPattern[pellet%len(xmPattern)]
+	seed := uint32(shot*31+pellet)*747796405 + uint32(weapon+1)*2891336453 + uint32(shooter)*2246822519
+	seed = seed*1664525 + 1013904223
+	jx := (float64(seed)/4294967296 - 0.5) * 0.28
+	seed = seed*1664525 + 1013904223
+	jy := (float64(seed)/4294967296 - 0.5) * 0.28
+	ring := math.Tan(deg * math.Pi / 180)
+	a := (o[0] + jx) * ring
+	b := (o[1] + jy) * ring
+	right := norm(cross(dir, Vec3{0, 1, 0}))
+	up := cross(right, dir)
 	return norm(Vec3{dir.X + right.X*a + up.X*b, dir.Y + right.Y*a + up.Y*b, dir.Z + right.Z*a + up.Z*b})
 }
 func cross(a, b Vec3) Vec3 { return Vec3{a.Y*b.Z - a.Z*b.Y, a.Z*b.X - a.X*b.Z, a.X*b.Y - a.Y*b.X} }

@@ -28,8 +28,8 @@ interface SoundCue {
 }
 
 const RELOAD_PITCH: Record<number, number> = { 0: 1.12, 1: 0.82, 2: 1.18, 3: 0.92, 4: 1, 5: 0.72, 7: 1.08, 8: 1.05, 9: 0.95, 10: 0.9, 11: 0.7, 12: 0.85 };
-const FIRE_KICK = [0.26, 0.62, 0.18, 0.46, 0.37, 0.82, 0, 0.16, 0.31, 0.4, 0.34, 0.66, 0.76] as const;
-const RECOIL_RECOVERY = [18, 11, 22, 12, 15, 8, 18, 20, 17, 14, 16, 10, 11] as const;
+const FIRE_KICK = [0.26, 0.62, 0.18, 0.39, 0.37, 0.82, 0, 0.16, 0.31, 0.4, 0.34, 0.66, 0.34] as const;
+const RECOIL_RECOVERY = [18, 11, 22, 13, 15, 8, 18, 20, 17, 14, 16, 10, 16] as const;
 function createMuzzleFlashTexture(): THREE.Texture {
   const canvas = new OffscreenCanvas(64, 64);
   const ctx = canvas.getContext('2d')!;

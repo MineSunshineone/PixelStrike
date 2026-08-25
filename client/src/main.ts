@@ -6,7 +6,7 @@ import { Weapons } from './weapons.js';
 import { Hud } from './hud.js';
 import { AudioEngine, type SfxName } from './audio.js';
 import { ParticleSystem } from './particles.js';
-import { KEY, PHYS, WEAPONS, isSniper, scopeSettleMs, type MapData, type PlayerSnap, type RosterEntry, type WeaponDef } from './constants.js';
+import { KEY, PHYS, WEAPONS, XM_PELLETS, isGun, isPistol, isShotgun, isSniper, scopeSettleMs, type MapData, type PlayerSnap, type RosterEntry, type WeaponDef } from './constants.js';
 import bundledMap from '../../map.json';
 
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -52,6 +52,7 @@ let alive = false;
 let myName = '';
 let killerId = -1;
 let killStreak = 0;
+let recoilBoostUntil = 0;
 let respawnAt = 0;
 let screenShake = 0;
 let aiming = false;
@@ -718,6 +719,7 @@ function handleEvent(e: GameEvent) {
       reloadPendingSlot = 0;
       weapons.cancelReload();
       speedBoostUntil = 0;
+      recoilBoostUntil = 0;
       local.flying = false;
       hud.setFlightState(false, false);
       clearCombatInput();
@@ -772,6 +774,7 @@ function handleEvent(e: GameEvent) {
     cameraEyeHeight = PHYS.eyeHeight;
     landingPenaltyUntil = 0;
     speedBoostUntil = 0;
+    recoilBoostUntil = 0;
     patternShots = 0;
     reloadPendingSlot = 0;
     weapons.cancelReload();
@@ -853,6 +856,30 @@ function handleEvent(e: GameEvent) {
     if (e.kind === 1) hud.showFlightAnnouncement(e.name || nameOf(e.player));
     return;
   }
+  if (e.type === 13 && e.player === net.yourId) {
+    const kind = e.kind ?? 0;
+    const ms = e.ms ?? 8000;
+    const parts: string[] = [];
+    if (kind & 1) {
+      reloadPendingSlot = 0;
+      weapons.cancelReload();
+      parts.push('弹药补充');
+    }
+    if (kind & 2) parts.push('生命恢复');
+    if (kind & 4) {
+      speedBoostUntil = performance.now() + ms;
+      parts.push('移速提升');
+    }
+    if (kind & 8) {
+      recoilBoostUntil = performance.now() + ms;
+      parts.push('后坐降低');
+    }
+    if (kind & 16) parts.push('伤害提升');
+    const label = parts.join(' · ') || '连杀奖励';
+    hud.showPickupNotice(label, kind & 1 ? 'ammo' : kind & 2 ? 'health' : kind & 4 ? 'speed' : 'buff');
+    audio.play(kind & 2 ? 'hitmarker' : 'weapon_switch', 0.75, 1.15);
+    return;
+  }
 }
 
 function nameOf(id?: number): string {
@@ -871,8 +898,9 @@ remotes.onShot = (s, position, burstShots) => {
   }
   if (!world) return;
   const o = remoteShotOrigin.set(position.x, position.y + (s.state & 4 ? PHYS.crouchEye : PHYS.eyeHeight), position.z);
-  const shotSample = (WEAPONS[s.weapon]?.pellets ?? 1) > 1 ? s.shot * 17 : s.shot;
-  const d = shotDirection(remoteShotDir, s.yaw, s.pitch, remoteSpread(s, burstShots), shotSample, s.weapon, s.id);
+  const shotgun = isShotgun(s.weapon);
+  const shotSample = shotgun ? s.shot : ((WEAPONS[s.weapon]?.pellets ?? 1) > 1 ? s.shot * 17 : s.shot);
+  const d = shotDirection(remoteShotDir, s.yaw, s.pitch, remoteSpread(s, burstShots), shotSample, s.weapon, s.id, shotgun ? 0 : undefined);
   const dist = world.raycastDistance(o, d, 180);
   weapons.spawnTracer(o, d, dist, false);
   playSpatial(fireSound(s.weapon), position.x, position.z, 0.65, 120, 0.97 + Math.random() * 0.06);
@@ -1053,7 +1081,9 @@ function fire(mode: number, t: number) {
   if (weapons.weaponId !== 6) {
     audio.play(fireSound(weapons.weaponId), 1, 0.985 + Math.random() * 0.03, 0, true);
     for (let i = 0; i < pellets; i++) {
-      const pelletDir = i === 0 ? dir : shotDirection(localPelletDir, local.yaw, local.pitch, spread, shotSample * 17 + i, weapons.weaponId, net.yourId);
+      const pelletDir = i === 0 && !isShotgun(weapons.weaponId)
+        ? dir
+        : shotDirection(localPelletDir, local.yaw, local.pitch, spread, isShotgun(weapons.weaponId) ? shotSample : shotSample * 17 + i, weapons.weaponId, net.yourId, isShotgun(weapons.weaponId) ? i : undefined);
       const dist = world?.raycastDistance(origin, pelletDir, 180) ?? 180;
       weapons.spawnTracer(origin, pelletDir, dist, true);
       if (dist < 180) {
@@ -1091,11 +1121,18 @@ function deathCam() {
 function weaponSpread(def: WeaponDef, vx: number, vz: number, onGround: boolean, crouching: boolean, landing: boolean, ads: boolean, burstShots: number): number {
   const moveFactor = Math.min(1, Math.hypot(vx, vz) / 3);
   let spread = def.spread + (def.moveSpread - def.spread) * moveFactor;
-  spread += Math.min(0.22, burstShots * def.bloom * 0.12);
+  spread += Math.min(0.28, burstShots * def.bloom * 0.14);
   if (!onGround) spread = Math.max(spread, def.moveSpread * 1.55 + 0.45);
-  if (crouching) spread *= 0.55;
-  if (ads && !isSniper(def.id)) spread *= 0.48;
+  if (crouching) spread *= 0.72;
+  if (ads && !isSniper(def.id)) spread *= isShotgun(def.id) ? 0.85 : 0.62;
   if (landing) spread = Math.max(spread, def.moveSpread * 1.12);
+  if (isGun(def.id)) {
+    let floor = 0.28;
+    if (isShotgun(def.id)) floor = 1.25;
+    else if (isSniper(def.id)) floor = ads ? 0.07 : 0;
+    else if (isPistol(def.id)) floor = 0.22;
+    if (floor > 0 && spread < floor) spread = floor;
+  }
   return spread;
 }
 
@@ -1116,7 +1153,8 @@ function remoteSpread(s: PlayerSnap, burstShots: number): number {
 
 function applyRecoil(weapon: number, shot: number, ads: boolean) {
   const i = Math.max(0, shot - 1);
-  const scale = ads ? 0.45 : 1;
+  let scale = ads ? 0.45 : 1;
+  if (performance.now() < recoilBoostUntil) scale *= 0.50;
   let pitch = 0;
   let yaw = 0;
   switch (weapon) {
@@ -1132,10 +1170,14 @@ function applyRecoil(weapon: number, shot: number, ads: boolean) {
       pitch = 0.0055 + Math.min(i, 8) * 0.0005;
       yaw = Math.sin(i * 1.7) * 0.0015;
       break;
-    case 3:
-      pitch = 0.019 + Math.min(i, 7) * 0.0026;
-      yaw = i < 8 ? (i % 2 ? 0.0034 : -0.0026) : -0.0055;
+    case 3: {
+      const akUp = [0.014, 0.015, 0.0165, 0.0175, 0.018, 0.0165, 0.015, 0.0135, 0.012, 0.011, 0.0105, 0.01, 0.0095, 0.009, 0.009, 0.0085];
+      const akSide = [0.0003, 0.0007, -0.0005, 0.0016, 0.0022, -0.0010, 0.0028, 0.0018, -0.0034, -0.0040, 0.0036, 0.0044, -0.0042, 0.0032, -0.0046, 0.0038];
+      const idx = Math.min(i, akUp.length - 1);
+      pitch = akUp[idx];
+      yaw = akSide[idx];
       break;
+    }
     case 4:
       pitch = 0.014 + Math.min(i, 7) * 0.0018;
       yaw = i < 8 ? (i % 2 ? 0.0024 : -0.0024) : 0.0038;
@@ -1163,8 +1205,8 @@ function applyRecoil(weapon: number, shot: number, ads: boolean) {
       pitch = 0.034;
       break;
     case 12:
-      pitch = 0.050;
-      yaw = i % 2 ? 0.007 : -0.007;
+      pitch = 0.016;
+      yaw = i % 2 ? 0.003 : -0.0026;
       break;
     default:
       return;
@@ -1173,17 +1215,27 @@ function applyRecoil(weapon: number, shot: number, ads: boolean) {
   local.yaw -= yaw * scale;
 }
 
-function shotDirection(out: THREE.Vector3, yaw: number, pitch: number, spread: number, shot: number, weapon: number, shooter: number): THREE.Vector3 {
+function shotDirection(out: THREE.Vector3, yaw: number, pitch: number, spread: number, shot: number, weapon: number, shooter: number, pellet?: number): THREE.Vector3 {
   const cp = Math.cos(pitch);
   out.set(-Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp);
   if (spread <= 0) return out;
+  shotRight.set(-out.z, 0, out.x).normalize();
+  shotUp.crossVectors(shotRight, out);
+  if (isShotgun(weapon) && pellet !== undefined) {
+    const o = XM_PELLETS[pellet % XM_PELLETS.length];
+    let seed = (Math.imul(shot * 31 + pellet, 747796405) + Math.imul(weapon + 1, 2891336453) + Math.imul(shooter, 2246822519)) >>> 0;
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const jx = (seed / 4294967296 - 0.5) * 0.28;
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const jy = (seed / 4294967296 - 0.5) * 0.28;
+    const ring = Math.tan(spread * Math.PI / 180);
+    return out.addScaledVector(shotRight, (o[0] + jx) * ring).addScaledVector(shotUp, (o[1] + jy) * ring).normalize();
+  }
   let seed = (Math.imul(shot, 747796405) + Math.imul(weapon + 1, 2891336453) + Math.imul(shooter, 2246822519)) >>> 0;
   seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
   const radius = Math.sqrt(seed / 4294967296) * Math.tan(spread * Math.PI / 180);
   seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
   const angle = seed / 4294967296 * Math.PI * 2;
-  shotRight.set(-out.z, 0, out.x).normalize();
-  shotUp.crossVectors(shotRight, out);
   return out.addScaledVector(shotRight, Math.cos(angle) * radius).addScaledVector(shotUp, Math.sin(angle) * radius).normalize();
 }
 

@@ -601,13 +601,14 @@ export class Hud {
     this.hitTimer = window.setTimeout(() => { this.hit.className = ''; }, head ? 220 : 150);
   }
 
-  showKillStreak(count: number, head = false) {
+  showKillStreak(count: number, head = false, reward = '') {
     if (count < 2) return;
     const title = count === 2 ? '双杀' : count === 3 ? '三杀' : count === 4 ? '疯狂四杀' : `${count} 连杀`;
-    this.streak.innerHTML = `<strong>${title}</strong><span>${head ? '爆头 · ' : ''}连续击杀 ${count} 人</span>`;
+    const extra = reward ? ` · ${reward}` : '';
+    this.streak.innerHTML = `<strong>${title}</strong><span>${head ? '爆头 · ' : ''}连续击杀 ${count} 人${extra}</span>`;
     this.streak.className = 'active';
     clearTimeout(this.streakTimer);
-    this.streakTimer = window.setTimeout(() => { this.streak.className = ''; }, 1500);
+    this.streakTimer = window.setTimeout(() => { this.streak.className = ''; }, 1800);
   }
 
   showKillMedal(head = false) {
@@ -658,7 +659,7 @@ export class Hud {
     setTimeout(() => row.remove(), 4200);
   }
 
-  showPickupNotice(message: string, kind: 'ammo' | 'health' | 'speed') {
+  showPickupNotice(message: string, kind: 'ammo' | 'health' | 'speed' | 'buff') {
     const toast = el('pickup-toast');
     toast.textContent = message;
     toast.dataset.kind = kind;

@@ -91,9 +91,9 @@ func TestBalanceValues(t *testing.T) {
 	if RespawnDelayS != 3*time.Second || WalkSpeed != 6.4 || GroundAccel != 44 || StopAccel != 60 || AirAccel != 9.5 || JumpVel != 8.4 || MaxRewindTicks != 8 {
 		t.Fatalf("unexpected movement balance")
 	}
-	wantDamage := []float64{21, 44, 21, 33, 29, 103, 34, 24, 25, 28, 27, 72, 14}
-	wantMag := []int{30, 11, 45, 45, 45, 8, 0, 18, 38, 38, 45, 12, 8}
-	wantReserve := []int{180, 53, 180, 135, 135, 45, 0, 36, 150, 135, 135, 120, 36}
+	wantDamage := []float64{23, 44, 22, 33, 29, 103, 34, 24, 27, 29, 27, 72, 17}
+	wantMag := []int{30, 11, 45, 45, 45, 8, 0, 18, 38, 38, 45, 12, 7}
+	wantReserve := []int{180, 53, 180, 135, 135, 45, 0, 36, 150, 135, 135, 120, 32}
 	for i, weapon := range Weapons {
 		if weapon.Dmg != wantDamage[i] || weapon.Mag != wantMag[i] || weapon.Reserve != wantReserve[i] {
 			t.Fatalf("%s balance = %.0f %d/%d", weapon.Name, weapon.Dmg, weapon.Mag, weapon.Reserve)
@@ -290,8 +290,20 @@ func TestArsenalRolesStaySeparated(t *testing.T) {
 		t.Fatalf("SSG should not body one-shot: %.1f", ssg.Dmg*ssg.ArmorPen)
 	}
 	xm := Weapons[12]
+	if float64(xm.Pellets)*xm.Dmg < MaxHP {
+		t.Fatalf("XM should one-tap unarmored if the cone connects: %.1f", float64(xm.Pellets)*xm.Dmg)
+	}
 	if float64(xm.Pellets)*xm.Dmg*xm.ArmorPen >= MaxHP {
 		t.Fatalf("XM should not armor-dump with all pellets: %.1f", float64(xm.Pellets)*xm.Dmg*xm.ArmorPen)
+	}
+	if xm.Rpm < 180 || !xm.Automatic {
+		t.Fatal("XM follow-up is still too slow")
+	}
+	if xm.SpreadDeg > 2.0 {
+		t.Fatalf("XM cone still too wide: %.2f", xm.SpreadDeg)
+	}
+	if Weapons[8].SpreadDeg > Weapons[2].SpreadDeg+0.05 {
+		t.Fatal("UMP spread is still unusable next to MP5")
 	}
 	if Weapons[2].SpreadDeg >= .7 {
 		t.Fatal("MP5 spread still unusable")
@@ -324,6 +336,17 @@ func TestWeaponSpreadStaysControllable(t *testing.T) {
 	if ads >= hipSpray {
 		t.Fatalf("ADS did not tighten inaccuracy: ads=%.3f hip=%.3f", ads, hipSpray)
 	}
+	adsFirst := weaponSpread(ak, 0, 0, true, false, false, true, 0)
+	if adsFirst < 0.26 {
+		t.Fatalf("ADS first shot is still a laser: %.3f", adsFirst)
+	}
+	if adsFirst >= first-0.05 {
+		t.Fatalf("ADS should still tighten first shot: ads=%.3f hip=%.3f", adsFirst, first)
+	}
+	awpScoped := weaponSpread(Weapons[5], 0, 0, true, false, false, true, 0)
+	if awpScoped < 0.06 {
+		t.Fatalf("scoped AWP has no spread: %.3f", awpScoped)
+	}
 }
 
 func TestPatternDirStaysInsideSpread(t *testing.T) {
@@ -337,6 +360,27 @@ func TestPatternDirStaysInsideSpread(t *testing.T) {
 	}
 	if patternDir(aim, 2, 1, 3, 7) == patternDir(aim, 2, 1, 3, 8) {
 		t.Fatal("different players received the same spread pattern")
+	}
+}
+
+func TestSnapshotOrdersNearbyPlayersFirst(t *testing.T) {
+	recv := &Player{PlayerState: PlayerState{Id: 5, Alive: true, Pos: Vec3{}}}
+	far := &Player{PlayerState: PlayerState{Id: 1, Alive: true, Pos: Vec3{Z: 90}}}
+	near := &Player{PlayerState: PlayerState{Id: 2, Alive: true, Pos: Vec3{Z: 8}}}
+	players := []*Player{far, recv, near}
+	states := make([]quantState, 3)
+	for i, p := range players {
+		states[i] = quantizeState(&p.PlayerState, 0)
+	}
+	snap := recv.BuildSnapshot(0, players, states)
+	if snap[7] != 3 {
+		t.Fatalf("expected 3 players, got %d", snap[7])
+	}
+	id0 := binary.LittleEndian.Uint16(snap[8:])
+	id1 := binary.LittleEndian.Uint16(snap[8+23:])
+	id2 := binary.LittleEndian.Uint16(snap[8+46:])
+	if id0 != 5 || id1 != 2 || id2 != 1 {
+		t.Fatalf("snapshot order = %d,%d,%d want self,near,far", id0, id1, id2)
 	}
 }
 
@@ -421,6 +465,73 @@ func TestBestSpawnNeverReturnsUnscoredOrigin(t *testing.T) {
 	}
 	if got := r.BestSpawn(&PlayerState{}); got == (Vec3{}) {
 		t.Fatal("crowded spawn selection returned unscored origin")
+	}
+}
+
+func TestStreakBuffsRespectCaps(t *testing.T) {
+	p := &PlayerState{Streak: 20}
+	if p.streakDamageMul() > streakDmgCap+1e-9 {
+		t.Fatalf("damage mul %v exceeds cap", p.streakDamageMul())
+	}
+	if p.streakSpeedMul() > streakSpeedCap+1e-9 {
+		t.Fatalf("speed mul %v exceeds cap", p.streakSpeedMul())
+	}
+	if p.streakScale() > streakScaleCap {
+		t.Fatalf("scale %d exceeds cap", p.streakScale())
+	}
+	if botSkill(99) > maxBotSkill {
+		t.Fatalf("bot skill %d exceeds cap", botSkill(99))
+	}
+}
+
+func TestStreakPicksHealWhenLowAndAmmoWhenDry(t *testing.T) {
+	r := &Room{history: make(map[uint16]*poseHistory)}
+	now := time.Unix(1, 0)
+	hurt := &PlayerState{Id: 1, Alive: true, IsBot: true, HP: 30, Armor: 10, Primary: 3, Secondary: 0, ActiveSlot: 1, Weapon: 3, Mags: [2]int{30, 12}, Reserves: [2]int{90, 24}}
+	victim := &PlayerState{Id: 11, Alive: true, IsBot: true, HP: 1}
+	hurt.Streak = 1
+	r.Damage(hurt, victim, 80, false, 3, now)
+	if hurt.HP <= 30 {
+		t.Fatalf("low HP should get heal, hp=%d", hurt.HP)
+	}
+	var healKind uint8
+	for _, e := range r.pending {
+		if e.Type == EvStreakBuff {
+			healKind = e.Kind
+		}
+	}
+	if healKind&StreakHeal == 0 {
+		t.Fatalf("expected heal, got kind=%d", healKind)
+	}
+
+	r.pending = nil
+	dry := &PlayerState{Id: 2, Alive: true, IsBot: true, HP: MaxHP, Armor: 100, Primary: 3, Secondary: 0, ActiveSlot: 1, Weapon: 3, Mags: [2]int{0, 12}, Reserves: [2]int{0, 24}}
+	victim2 := &PlayerState{Id: 12, Alive: true, IsBot: true, HP: 1}
+	dry.Streak = 1
+	r.Damage(dry, victim2, 80, false, 3, now)
+	if dry.Mags[0] == 0 {
+		t.Fatal("empty mag should get ammo")
+	}
+	var ammoKind uint8
+	for _, e := range r.pending {
+		if e.Type == EvStreakBuff {
+			ammoKind = e.Kind
+		}
+	}
+	if ammoKind&StreakAmmo == 0 {
+		t.Fatalf("expected ammo, got kind=%d", ammoKind)
+	}
+}
+
+func TestBotMarksRevengeOnDeath(t *testing.T) {
+	killer := &Player{PlayerState: PlayerState{Id: 1, Alive: true, IsBot: true, HP: MaxHP}}
+	victim := &Player{PlayerState: PlayerState{Id: 2, Alive: true, IsBot: true, HP: 1}}
+	r := &Room{Players: []*Player{killer, victim}, botAIs: map[uint16]*BotAI{2: {}}, history: make(map[uint16]*poseHistory)}
+	now := time.Now()
+	r.Damage(&killer.PlayerState, &victim.PlayerState, 80, false, 3, now)
+	ai := r.botAIs[2]
+	if ai == nil || ai.RevengeID != 1 || !now.Before(ai.RevengeUntil) {
+		t.Fatalf("bot did not mark revenge: %+v", ai)
 	}
 }
 
