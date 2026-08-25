@@ -39,8 +39,8 @@ export class CharacterPreview {
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
-    this.camera.position.set(0, 0.95, 3.2);
-    this.camera.lookAt(0, 0.85, 0);
+    this.camera.position.set(0, 1.05, 2.95);
+    this.camera.lookAt(0, 0.95, 0);
     this.createRenderer();
 
     const hemi = new THREE.HemisphereLight(0xfff6ea, 0x5a6270, 1.4);

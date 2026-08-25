@@ -4,6 +4,7 @@ const SFX_NAMES = [
   'fire_glock', 'fire_deagle', 'fire_mp5', 'fire_ak47', 'fire_m4a4', 'fire_awp',
   'fire_usp', 'fire_ump', 'fire_famas', 'fire_aug', 'fire_scout', 'fire_xm',
   'headshot_ding', 'hitmarker', 'death', 'hurt', 'grenade_explode',
+  'kill_confirm', 'headshot_kill',
   'step', 'reload_click', 'bolt_rack',
   'mag_out', 'mag_in', 'bolt_cycle', 'empty_click',
   'knife_slash', 'knife_hit', 'weapon_switch',
@@ -176,6 +177,17 @@ export class AudioEngine {
         break;
       case 'hitmarker':
         osc('sine', 2400, 2400, 0.05);
+        break;
+      case 'kill_confirm':
+        osc('sine', 135, 48, 0.32);
+        osc('square', 420, 900, 0.17);
+        noise(0.12, 3600);
+        break;
+      case 'headshot_kill':
+        osc('sine', 2600, 2350, 0.28);
+        osc('sine', 3900, 3550, 0.2);
+        osc('sine', 120, 42, 0.3);
+        noise(0.16, 4200);
         break;
       case 'death':
         osc('sawtooth', 280, 40, 0.6);

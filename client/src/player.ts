@@ -89,8 +89,8 @@ const prediction = new THREE.Vector3();
 const gunColor = new THREE.Color();
 const goldGunColor = new THREE.Color(0xffc928);
 const diamondGunColor = new THREE.Color(0x72e7ff);
-// Standing geometry spans 0.04–1.605 m; map it exactly onto the 1.8 m hitbox.
-export const STANDING_VISUAL_SCALE = 1.8 / 1.565;
+// Standing geometry spans 0.04–1.605 m; map it exactly onto the 2.1 m hitbox.
+export const STANDING_VISUAL_SCALE = 2.1 / 1.565;
 export const STANDING_VISUAL_OFFSET = -0.04 * STANDING_VISUAL_SCALE;
 const approach = (value: number, wanted: number, amount: number) => value < wanted ? Math.min(wanted, value + amount) : Math.max(wanted, value - amount);
 const angleLerp = (a: number, b: number, t: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
@@ -540,7 +540,7 @@ export class RemotePlayers {
     for (const model of this.models.values()) {
       if (!model.visible) continue;
       const dx = model.position.x - camera.position.x;
-      const dy = model.position.y + 1.7 - camera.position.y;
+      const dy = model.position.y + 1.75 - camera.position.y;
       const dz = model.position.z - camera.position.z;
       const distSq = dx * dx + dy * dy + dz * dz;
       if (distSq > 50 * 50 || dx * this.viewDir.x + dy * this.viewDir.y + dz * this.viewDir.z <= 0) continue;
@@ -560,7 +560,7 @@ export class RemotePlayers {
       const label = this.labels[i];
       const model = this.labelModels[i];
       const crouch = !!(model.state.state & 4);
-      this.labelPoint.copy(model.position).y += crouch ? 1.55 : 2.05;
+      this.labelPoint.copy(model.position).y += crouch ? 1.8 : 2.35;
       this.labelRay.subVectors(this.labelPoint, camera.position);
       const distance = this.labelRay.length();
       this.labelPoint.project(camera);

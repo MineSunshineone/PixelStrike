@@ -697,6 +697,8 @@ function handleEvent(e: GameEvent) {
     hud.killFeedEntry(killer, victim, e.weapon ?? 3, e.headshot === 1, mine);
     if (e.killer === net.yourId && e.victim !== net.yourId) {
       hud.showKillStreak(++killStreak, e.headshot === 1);
+      hud.showKillMedal(e.headshot === 1);
+      audio.play(e.headshot === 1 ? 'headshot_kill' : 'kill_confirm', 0.9, 1, 0, true);
     }
     const victimState = states.get(e.victim ?? -1);
     if (victimState) particles.spawnDeath(eventOrigin.set(victimState.x, victimState.y + 0.9, victimState.z), e.headshot === 1);
@@ -868,11 +870,11 @@ remotes.onShot = (s, position, burstShots) => {
     return;
   }
   if (!world) return;
-  const o = remoteShotOrigin.set(position.x, position.y + (s.state & 4 ? 1.12 : 1.6), position.z);
+  const o = remoteShotOrigin.set(position.x, position.y + (s.state & 4 ? PHYS.crouchEye : PHYS.eyeHeight), position.z);
   const shotSample = (WEAPONS[s.weapon]?.pellets ?? 1) > 1 ? s.shot * 17 : s.shot;
   const d = shotDirection(remoteShotDir, s.yaw, s.pitch, remoteSpread(s, burstShots), shotSample, s.weapon, s.id);
   const dist = world.raycastDistance(o, d, 180);
-  weapons.spawnTracer(o, d, dist);
+  weapons.spawnTracer(o, d, dist, false);
   playSpatial(fireSound(s.weapon), position.x, position.z, 0.65, 120, 0.97 + Math.random() * 0.06);
 };
 
@@ -1053,7 +1055,7 @@ function fire(mode: number, t: number) {
     for (let i = 0; i < pellets; i++) {
       const pelletDir = i === 0 ? dir : shotDirection(localPelletDir, local.yaw, local.pitch, spread, shotSample * 17 + i, weapons.weaponId, net.yourId);
       const dist = world?.raycastDistance(origin, pelletDir, 180) ?? 180;
-      weapons.spawnTracer(origin, pelletDir, dist);
+      weapons.spawnTracer(origin, pelletDir, dist, true);
       if (dist < 180) {
         particles.spawnImpact(impactPoint.copy(origin).addScaledVector(pelletDir, dist), impactNormal, 0xd6b36e, pellets > 1 ? 3 : 5);
       }

@@ -131,6 +131,17 @@ seed = effectsSeed;
 // 2. Combat impact & hit sounds
 wav('headshot_ding', mix(tone(1760, 0.4, 'sine', 0.6, 8), tone(2640, 0.25, 'sine', 0.35, 12), tone(880, 0.3, 'square', 0.15, 10)));
 wav('hitmarker', mix(tone(2200, 0.06, 'sine', 0.5, 45), tone(1100, 0.04, 'square', 0.3, 50)));
+wav('kill_confirm', mix(
+  sweep(125, 52, 0.32, 0.7, 3),
+  sweep(420, 920, 0.18, 0.26, 5),
+  delayed(tone(3100, 0.055, 'sine', 0.22, 38), 0.045),
+  delayed(tone(1250, 0.07, 'noise', 0.22, 35), 0.012)));
+wav('headshot_kill', mix(
+  tone(2600, 0.3, 'sine', 0.48, 7),
+  tone(3900, 0.22, 'sine', 0.3, 9),
+  sweep(120, 46, 0.31, 0.5, 3.5),
+  delayed(tone(5200, 0.045, 'sine', 0.18, 55), 0.035),
+  delayed(tone(1800, 0.075, 'noise', 0.2, 32), 0.014)));
 wav('death', mix(sweep(320, 45, 0.8, 0.6, 3), tone(80, 0.5, 'sine', 0.4, 6)));
 wav('hurt', mix(sweep(240, 80, 0.25, 0.6, 8), tone(110, 0.2, 'saw', 0.3, 14)));
 
@@ -146,4 +157,4 @@ wav('knife_slash', mix(sweep(1350, 240, 0.15, 0.42, 15), tone(760, 0.075, 'noise
 wav('knife_hit', mix(tone(135, 0.13, 'sine', 0.65, 20), tone(1750, 0.035, 'saw', 0.45, 48), tone(580, 0.055, 'noise', 0.32, 30)));
 wav('weapon_switch', cat(tone(1900, 0.025, 'noise', 0.26, 65), tone(760, 0.045, 'square', 0.22, 42), tone(1500, 0.035, 'saw', 0.26, 48)));
 wav('grenade_explode', mix(gunshot(0.9, 7, 0.12, 0.035), tone(48, 0.8, 'sine', 0.9, 3)));
-console.log('generated 27 game WAV audio assets');
+console.log('generated 29 game WAV audio assets');

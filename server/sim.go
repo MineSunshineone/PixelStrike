@@ -71,9 +71,9 @@ const (
 	SpawnProtectS   = 2 * time.Second
 	AWPScopeTime    = 320 * time.Millisecond
 	RespawnDelayS   = 3 * time.Second
-	EyeHeight       = 1.6
+	EyeHeight       = 1.7
 	CrouchEyeH      = 1.12
-	StandingHeight  = 1.8
+	StandingHeight  = 2.1
 	CrouchingHeight = 1.3
 	FlightSpeed     = WalkSpeed
 	MaxFlightHeight = StandingHeight * 25

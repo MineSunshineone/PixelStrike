@@ -65,7 +65,7 @@ export class Hud {
   sensitivity = 0.00216;
   adsSensitivity = 0.85;
   volume = 0.8;
-  hipFov = 75;
+  hipFov = 62;
   bobScale = 0.55;
   quality: 'low' | 'medium' | 'high' = 'medium';
   private loadoutPrimary = -1;
@@ -87,6 +87,7 @@ export class Hud {
   private killfeed = el('killfeed');
   private hit = el('hitmarker');
   private streak = el('kill-streak');
+  private killMedal = el('kill-medal');
   private crosshair = el('crosshair');
   private damage = el('damage-flash');
   private scope = el('sniper-scope');
@@ -99,6 +100,7 @@ export class Hud {
   private hitTimer = 0;
   private damageTimer = 0;
   private streakTimer = 0;
+  private killMedalTimer = 0;
   private lastHp = -1;
   private lastArmor = -1;
   private lastInventory = '';
@@ -308,7 +310,8 @@ export class Hud {
     const savedAdsSens = localStorage.getItem('ps_ads_sens');
     const savedVol = localStorage.getItem('ps_vol');
     const savedQ = localStorage.getItem('ps_quality') as typeof this.quality | null;
-    const savedFov = localStorage.getItem('ps_hip_fov');
+    // v2 gives existing players the tighter default FOV once.
+    const savedFov = localStorage.getItem('ps_hip_fov_v2');
     const savedBob = localStorage.getItem('ps_gun_bob');
 
     if (savedSens && sens) sens.value = savedSens;
@@ -322,7 +325,7 @@ export class Hud {
     this.adsSensitivity = adsSens ? +adsSens.value / 100 : 0.85;
     this.volume = vol ? +vol.value / 100 : 0.8;
     this.quality = quality ? (quality.value as typeof this.quality) : 'medium';
-    this.hipFov = fov ? +fov.value : 75;
+    this.hipFov = fov ? +fov.value : 62;
     this.bobScale = bob ? +bob.value / 100 : 0.55;
 
     sens?.addEventListener('input', () => {
@@ -349,7 +352,7 @@ export class Hud {
 
     fov?.addEventListener('input', () => {
       this.hipFov = +fov.value;
-      localStorage.setItem('ps_hip_fov', fov.value);
+      localStorage.setItem('ps_hip_fov_v2', fov.value);
       this.onFovChange?.(this.hipFov);
     });
 
@@ -605,6 +608,15 @@ export class Hud {
     this.streak.className = 'active';
     clearTimeout(this.streakTimer);
     this.streakTimer = window.setTimeout(() => { this.streak.className = ''; }, 1500);
+  }
+
+  showKillMedal(head = false) {
+    if (!this.killMedal) return;
+    this.killMedal.className = '';
+    void this.killMedal.offsetWidth;
+    this.killMedal.className = head ? 'active head' : 'active';
+    clearTimeout(this.killMedalTimer);
+    this.killMedalTimer = window.setTimeout(() => { this.killMedal.className = ''; }, 1150);
   }
 
   setCrosshair(spread: number) {

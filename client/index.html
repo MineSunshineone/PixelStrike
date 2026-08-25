@@ -635,6 +635,42 @@
     #kill-streak.active { display: grid; animation: streak-in .2s ease-out; }
     #kill-streak strong { color: var(--accent-hi); font: 28px/.95 var(--font-display); letter-spacing: .12em; }
     #kill-streak span { margin-top: 4px; color: var(--paper); font: 700 10px var(--font-mono); letter-spacing: .08em; }
+    #kill-medal {
+      position: absolute;
+      left: 50%;
+      bottom: 112px;
+      z-index: 41;
+      display: none;
+      width: 88px;
+      height: 88px;
+      transform: translate(-50%, 16px) scale(.72);
+      border: 3px solid #66e6ff;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 50% 42%, rgb(103 232 255 / .34), transparent 58%),
+        radial-gradient(circle, rgb(7 17 22 / .97) 52%, rgb(7 25 32 / .99) 100%);
+      box-shadow: 0 0 28px rgb(103 232 255 / .42), inset 0 0 22px rgb(103 232 255 / .25);
+      color: #b8f7ff;
+      pointer-events: none;
+    }
+    #kill-medal::after {
+      content: "";
+      position: absolute;
+      inset: -8px;
+      border: 1px solid rgb(103 232 255 / .44);
+      border-radius: 50%;
+    }
+    #kill-medal.active { display: grid; place-items: center; animation: kill-medal-pop 1.15s ease-out forwards; }
+    #kill-medal.head {
+      border-color: #ffce54;
+      background:
+        radial-gradient(circle at 50% 42%, rgb(255 206 84 / .4), transparent 58%),
+        radial-gradient(circle, rgb(36 10 8 / .97) 52%, rgb(60 15 10 / .99) 100%);
+      box-shadow: 0 0 34px rgb(255 115 64 / .5), inset 0 0 24px rgb(255 206 84 / .3);
+      color: #ffe6a1;
+    }
+    #kill-medal.head::after { border-color: rgb(255 115 64 / .6); }
+    #kill-medal svg { width: 46px; height: 46px; filter: drop-shadow(0 0 7px currentColor); }
     #player-labels { position: absolute; inset: 0; overflow: hidden; }
     .player-label {
       position: absolute;
@@ -1090,6 +1126,13 @@
     @keyframes feed-in { from { opacity: 0; transform: translateX(10px); } }
     @keyframes hit-confirm { from { opacity: 0; transform: translate(-50%, -50%) rotate(45deg) scale(1.7); } to { opacity: 1; transform: translate(-50%, -50%) rotate(45deg) scale(1); } }
     @keyframes streak-in { from { opacity: 0; transform: translate(-50%, -10px) scale(.9); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
+    @keyframes kill-medal-pop {
+      0% { opacity: 0; transform: translate(-50%, 24px) scale(.6); }
+      16% { opacity: 1; transform: translate(-50%, 4px) scale(1.08); }
+      28% { transform: translate(-50%, 0) scale(1); }
+      74% { opacity: 1; transform: translate(-50%, -3px) scale(1.02); }
+      100% { opacity: 0; transform: translate(-50%, -16px) scale(.94); }
+    }
     @keyframes reconnect-scan { from { transform: translateX(-110%); } to { transform: translateX(350%); } }
     @keyframes upgrade-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
     @media (prefers-reduced-motion: reduce) {
@@ -1336,6 +1379,13 @@
     </div>
     <div id="killfeed" aria-live="polite"></div>
     <div id="kill-streak" role="status" aria-live="assertive"></div>
+    <div id="kill-medal" aria-hidden="true">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+        <circle cx="16" cy="16" r="7.2" />
+        <path d="M16 2.5v5.4M16 24.1v5.4M2.5 16h5.4M24.1 16h5.4" />
+        <circle cx="16" cy="16" r="1.8" fill="currentColor" stroke="none" />
+      </svg>
+    </div>
     <div id="player-labels" aria-hidden="true"></div>
     <div id="crosshair" aria-hidden="true">
       <div class="ch-line ch-top"></div><div class="ch-line ch-bot"></div>
@@ -1491,7 +1541,7 @@
         </div>
         <div class="field">
           <label for="fov-slider">视野 FOV</label>
-          <input id="fov-slider" type="range" min="70" max="100" value="75">
+          <input id="fov-slider" type="range" min="55" max="100" value="62">
         </div>
         <div class="field">
           <label for="bob-slider">持枪手感</label>
