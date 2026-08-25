@@ -1126,6 +1126,10 @@ function handleEvent(e: GameEvent) {
     hud.showRevengeAnnouncement(e.name ?? nameOf(e.player));
     return;
   }
+  if (e.type === 15) {
+    hud.showBondEvent(e.kind ?? 0, e.name ?? nameOf(e.player), e.streak ?? 0);
+    return;
+  }
   if (e.type === 0) {
     // EvKill
     const killer = nameOf(e.killer);
