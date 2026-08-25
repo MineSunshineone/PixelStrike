@@ -79,6 +79,8 @@ const (
 	FlightSpeed                 = WalkSpeed
 	MaxFlightHeight             = StandingHeight * 25
 	RevengeDeathThreshold uint8 = 10
+	BondCoverRange              = 20.0
+	BondAvengeWindow            = 30 * time.Second
 )
 
 type PlayerState struct {
@@ -102,6 +104,10 @@ type PlayerState struct {
 	NoKillDeaths                                                   uint8
 	RevengeReady, RevengeActive                                    bool
 	RevengeShots                                                   uint8
+	BondMate                                                       uint16
+	BondScore                                                      uint16
+	LastKiller                                                     uint16
+	KilledAt                                                       time.Time
 	LastInputSeq, LastShotSeq                                      uint16
 	HasShot                                                        bool
 	LastShotAt                                                     time.Time
@@ -602,6 +608,41 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	if !victim.IsBot {
 		r.Store.Accumulate(victim.Account, 0, 1)
 	}
+
+	// Bond system: record who killed this player for avenging
+	victim.LastKiller = attacker.Id
+	victim.KilledAt = now
+
+	// Bond check: did the attacker just avenge their bond mate?
+	if attacker.BondMate != 0 && attacker.BondMate != attacker.Id {
+		if mate := r.findPlayer(attacker.BondMate); mate != nil {
+			if mate.LastKiller == victim.Id && now.Sub(mate.KilledAt) < BondAvengeWindow {
+				attacker.BondScore++
+				r.Emit(Event{Type: EvBondEvent, Player: attacker.Id, Victim: mate.Id, Kind: 1, Dmg: attacker.BondScore, Name: attacker.Name})
+			}
+		}
+	}
+
+	// Bond check: is the attacker covering their bond mate (nearby)?
+	if attacker.BondMate != 0 && attacker.BondMate != attacker.Id {
+		if mate := r.findPlayer(attacker.BondMate); mate != nil && mate.Alive {
+			dx := attacker.Pos.X - mate.Pos.X
+			dz := attacker.Pos.Z - mate.Pos.Z
+			if dx*dx+dz*dz <= BondCoverRange*BondCoverRange {
+				attacker.BondScore++
+				r.Emit(Event{Type: EvBondEvent, Player: attacker.Id, Victim: mate.Id, Kind: 0, Dmg: attacker.BondScore, Name: attacker.Name})
+			}
+		}
+	}
+
+	// Bond check: streak resonance (both on 2+ streak)
+	if attacker.BondMate != 0 && attacker.BondMate != attacker.Id && attacker.Streak >= 2 {
+		if mate := r.findPlayer(attacker.BondMate); mate != nil && mate.Alive && mate.Streak >= 2 {
+			attacker.BondScore++
+			r.Emit(Event{Type: EvBondEvent, Player: attacker.Id, Victim: mate.Id, Kind: 2, Dmg: attacker.BondScore, Name: attacker.Name})
+		}
+	}
+
 	victim.Alive, victim.Reloading = false, false
 	victim.RevengeActive, victim.RevengeShots = false, 0
 	victim.InvincibleUntil = time.Time{}
@@ -827,10 +868,26 @@ func (r *Room) Respawn(p *PlayerState, now time.Time) {
 		r.Emit(Event{Type: EvRevenge, Player: p.Id, Name: p.Name})
 	}
 	p.RevengeReady = false
+	p.LastKiller = 0
 	p.LandingUntil, p.AimStarted = time.Time{}, time.Time{}
 	p.SpeedUntil, p.DmgUntil, p.RecoilUntil = time.Time{}, time.Time{}, time.Time{}
 	p.Streak = 0
 	p.RespawnAt = time.Time{}
+
+	// Bond system: auto-pair unbonded human players
+	if p.BondMate == 0 && !p.IsBot {
+		for _, other := range r.Players {
+			o := &other.PlayerState
+			if o.Id == p.Id || o.IsBot || o.BondMate != 0 || !o.Alive {
+				continue
+			}
+			p.BondMate = o.Id
+			o.BondMate = p.Id
+			r.Emit(Event{Type: EvBondEvent, Player: p.Id, Victim: o.Id, Kind: 3, Name: p.Name})
+			break
+		}
+	}
+
 	r.Emit(Event{Type: EvRespawn, Player: p.Id, Origin: p.Pos})
 }
 
