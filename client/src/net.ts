@@ -124,6 +124,15 @@ export class Net {
           e.name = new TextDecoder().decode(new Uint8Array(v.buffer, v.byteOffset + o + 3, len));
           o += 3 + len; break;
         }
+        case 15: {
+          e.player = v.getUint16(o, true);
+          e.victim = v.getUint16(o + 2, true);
+          e.kind = v.getUint8(o + 4);
+          e.streak = v.getUint8(o + 5);
+          const len = v.getUint8(o + 6);
+          e.name = new TextDecoder().decode(new Uint8Array(v.buffer, v.byteOffset + o + 7, len));
+          o += 7 + len; break;
+        }
       }
       rows.push(e);
     }
