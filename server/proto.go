@@ -45,6 +45,7 @@ const (
 	EvPickupSpawn
 	EvPickupTaken
 	EvFlightToggle
+	EvStreakBuff
 )
 
 type Event struct {
@@ -186,6 +187,11 @@ func Events(evts []Event) []byte {
 			nb := safeNameBytes(e.Name)
 			w.U8(uint8(len(nb)))
 			w.b = append(w.b, nb...)
+		case EvStreakBuff:
+			w.U16(e.Player)
+			w.U8(e.Kind)
+			w.U8(e.Dmg)
+			w.U16(e.Ms)
 		}
 	}
 	return w.Bytes()

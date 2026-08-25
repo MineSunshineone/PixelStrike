@@ -98,51 +98,58 @@ func (r *Room) Run() {
 		}
 		r.FinishReloads(now)
 		r.Step(now)
-		var evts []Event
-		if r.tick%2 == 0 {
-			evts = r.pending
-			r.pending = nil
-		}
+		evts := r.pending
+		r.pending = nil
+		needSnap := r.tick%2 == 0
 		var outs []outbound
-		if r.tick%2 == 0 {
+		if needSnap || len(evts) > 0 {
 			players := r.Players
 			outs = r.outboundBuf[:0]
-			r.quantizedBuf = quantizePlayers(r.quantizedBuf, players, now.UnixNano())
+			if needSnap {
+				r.quantizedBuf = quantizePlayers(r.quantizedBuf, players, now.UnixNano())
+			}
 			var periodicRoster []byte
-			if r.tick%600 == 0 {
+			if needSnap && r.tick%600 == 0 {
 				periodicRoster = Roster(players)
 			}
 			for _, p := range players {
 				if p.IsBot || !p.ready {
 					continue
 				}
-				out := outbound{p: p, snapshot: p.BuildSnapshot(r.tick, players, r.quantizedBuf)}
-				self := compactSelf(&p.PlayerState)
-				if r.tick%60 == 0 || !p.hasLastSelf || self != p.lastSelf {
-					out.self = SelfState(&p.PlayerState)
-					p.lastSelf, p.hasLastSelf = self, true
+				out := outbound{p: p}
+				if needSnap {
+					out.snapshot = p.BuildSnapshot(r.tick, players, r.quantizedBuf)
+					self := compactSelf(&p.PlayerState)
+					if r.tick%60 == 0 || !p.hasLastSelf || self != p.lastSelf {
+						out.self = SelfState(&p.PlayerState)
+						p.lastSelf, p.hasLastSelf = self, true
+					}
+					if periodicRoster != nil {
+						out.roster = periodicRoster
+					} else if p.rosterRequested {
+						out.roster = Roster(players)
+					}
+					if periodicRoster != nil || p.rosterRequested {
+						p.rosterRequested = false
+					}
 				}
 				if len(evts) > 0 {
 					if filtered := r.eventsFor(p, evts); len(filtered) > 0 {
 						out.events = Events(filtered)
 					}
 				}
-				if periodicRoster != nil {
-					out.roster = periodicRoster
-				} else if p.rosterRequested {
-					out.roster = Roster(players)
+				if out.snapshot != nil || out.self != nil || out.events != nil || out.roster != nil {
+					outs = append(outs, out)
 				}
-				if periodicRoster != nil || p.rosterRequested {
-					p.rosterRequested = false
-				}
-				outs = append(outs, out)
 			}
 		}
 		r.tick++
 		r.mu.Unlock()
 		for i := range outs {
 			out := &outs[i]
-			out.p.Send(out.snapshot)
+			if out.snapshot != nil {
+				out.p.Send(out.snapshot)
+			}
 			if out.self != nil {
 				out.p.Send(out.self)
 			}
@@ -172,6 +179,8 @@ func (r *Room) eventsFor(target *Player, evts []Event) []Event {
 		switch e.Type {
 		case EvKill, EvPlayerName, EvPlayerLeave, EvFlightToggle:
 			send = true
+		case EvStreakBuff:
+			send = e.Player == target.Id
 		case EvHit:
 			send = e.Player == target.Id || e.Victim == target.Id
 		case EvRespawn:

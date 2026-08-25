@@ -70,9 +70,10 @@ export class LocalPlayer {
       this.vel.z = vz;
       return;
     }
-    if (errorSq < 0.0004) return;
-    const cy = this.onGround || this.flying ? (target.y - this.pos.y) * 0.15 : 0;
-    correction.set((target.x - this.pos.x) * 0.15, cy, (target.z - this.pos.z) * 0.15);
+    if (errorSq < 0.0025) return;
+    const pull = 0.10;
+    const cy = this.onGround || this.flying ? (target.y - this.pos.y) * pull : 0;
+    correction.set((target.x - this.pos.x) * pull, cy, (target.z - this.pos.z) * pull);
     if (boxes) moveAABB(this.pos, correction, 1, boxes, this.height(), false);
     else this.pos.add(correction);
   }
@@ -428,7 +429,6 @@ export class RemotePlayers {
     const dt = Math.min(0.05, Math.max(0.001, (now - this.lastUpdate) / 1000));
     this.lastUpdate = now;
     if (this.models.size === 0) return;
-    const alpha = 1 - Math.exp(-dt * 16);
     let uniformColorsDirty = false, gunColorsDirty = false;
 
     for (const model of this.models.values()) {
@@ -443,11 +443,12 @@ export class RemotePlayers {
       model.visible = true;
 
       const age = Math.min(0.2, Math.max(0, (now - model.sampleAt) / 1000));
+      const follow = 1 - Math.exp(-dt * (age < 0.08 ? 20 : 11));
       goal.set(state.x + state.vx * age, state.y, state.z + state.vz * age);
       if (model.position.distanceToSquared(goal) > 64) model.position.copy(goal);
-      else model.position.lerp(goal, alpha);
-      model.yaw = angleLerp(model.yaw, state.yaw, alpha);
-      model.pitch += (state.pitch - model.pitch) * alpha;
+      else model.position.lerp(goal, follow);
+      model.yaw = angleLerp(model.yaw, state.yaw, follow);
+      model.pitch += (state.pitch - model.pitch) * follow;
 
       const speed = Math.sqrt(state.vx * state.vx + state.vz * state.vz);
       model.walk += speed * dt * 2.2;

@@ -1,6 +1,6 @@
 import { OP, PROTOCOL_VERSION, type PlayerSnap, type RosterEntry } from './constants.js';
 
-export interface GameEvent { type:number; killer?:number; victim?:number; player?:number; weapon?:number; headshot?:number; origin?:[number,number,number]; dir?:[number,number,number]; name?:string; pickup?:number; kind?:number; ms?:number }
+export interface GameEvent { type:number; killer?:number; victim?:number; player?:number; weapon?:number; headshot?:number; origin?:[number,number,number]; dir?:[number,number,number]; name?:string; pickup?:number; kind?:number; ms?:number; streak?:number }
 export interface SelfState { ack:number; slot:number; weapon:number; weaponSkin:number; mag:number; reserve:number; nades:number }
 
 export class Net {
@@ -75,7 +75,7 @@ export class Net {
       this.onRoster?.(rows);
     }
   }
-  private decodeSnapshot(v:DataView){const tick=v.getUint32(1,true),ack=v.getUint16(5,true),n=v.getUint8(7);this.lastServerTick=tick;let o=8;const updated:PlayerSnap[]=[];for(let i=0;i<n;i++){const id=v.getUint16(o,true),mask=v.getUint16(o+2,true);o+=4;let s=this.states.get(id);if(mask===0x8000){s={id,x:v.getInt16(o,true)/100,y:v.getInt16(o+2,true)/100,z:v.getInt16(o+4,true)/100,yaw:half(v.getInt16(o+6,true)),pitch:half(v.getInt16(o+8,true)),vx:v.getInt8(o+10)/10,vz:v.getInt8(o+11)/10,hp:v.getUint8(o+12),armor:v.getUint8(o+13),state:v.getUint8(o+14),weapon:v.getUint8(o+15),shot:v.getUint8(o+16),skin:v.getUint8(o+17),weaponSkin:v.getUint8(o+18)};o+=19}else{if(!s)throw new Error(`delta without baseline ${id}`);if(mask&1){s.x+=v.getInt8(o++)/100;s.y+=v.getInt8(o++)/100;s.z+=v.getInt8(o++)/100}else if(mask&2){s.x=v.getInt16(o,true)/100;s.y=v.getInt16(o+2,true)/100;s.z=v.getInt16(o+4,true)/100;o+=6}if(mask&4){s.yaw=wrap(s.yaw+half(v.getInt8(o++)));s.pitch+=half(v.getInt8(o++))}else if(mask&8){s.yaw=half(v.getInt16(o,true));s.pitch=half(v.getInt16(o+2,true));o+=4}if(mask&16){s.vx=v.getInt8(o++)/10;s.vz=v.getInt8(o++)/10}if(mask&32){s.hp=v.getUint8(o++);s.armor=v.getUint8(o++)}if(mask&64)s.state=v.getUint8(o++);if(mask&128)s.weapon=v.getUint8(o++);if(mask&256)s.shot=v.getUint8(o++);if(mask&512)s.skin=v.getUint8(o++);if(mask&1024)s.weaponSkin=v.getUint8(o++)}this.states.set(id,s);updated.push(s)}this.onSnapshot(tick,ack,updated)}
+  private decodeSnapshot(v:DataView){const tick=v.getUint32(1,true),ack=v.getUint16(5,true),n=v.getUint8(7);this.lastServerTick=tick;let o=8;const updated:PlayerSnap[]=[];for(let i=0;i<n;i++){const id=v.getUint16(o,true),mask=v.getUint16(o+2,true);o+=4;let s=this.states.get(id);if(mask===0x8000){s={id,x:v.getInt16(o,true)/100,y:v.getInt16(o+2,true)/100,z:v.getInt16(o+4,true)/100,yaw:half(v.getInt16(o+6,true)),pitch:half(v.getInt16(o+8,true)),vx:v.getInt8(o+10)/10,vz:v.getInt8(o+11)/10,hp:v.getUint8(o+12),armor:v.getUint8(o+13),state:v.getUint8(o+14),weapon:v.getUint8(o+15),shot:v.getUint8(o+16),skin:v.getUint8(o+17),weaponSkin:v.getUint8(o+18)};o+=19}else{if(!s){if(mask&1)o+=3;else if(mask&2)o+=6;if(mask&4)o+=2;else if(mask&8)o+=4;if(mask&16)o+=2;if(mask&32)o+=2;if(mask&64)o+=1;if(mask&128)o+=1;if(mask&256)o+=1;if(mask&512)o+=1;if(mask&1024)o+=1;continue}if(mask&1){s.x+=v.getInt8(o++)/100;s.y+=v.getInt8(o++)/100;s.z+=v.getInt8(o++)/100}else if(mask&2){s.x=v.getInt16(o,true)/100;s.y=v.getInt16(o+2,true)/100;s.z=v.getInt16(o+4,true)/100;o+=6}if(mask&4){s.yaw=wrap(s.yaw+half(v.getInt8(o++)));s.pitch+=half(v.getInt8(o++))}else if(mask&8){s.yaw=half(v.getInt16(o,true));s.pitch=half(v.getInt16(o+2,true));o+=4}if(mask&16){s.vx=v.getInt8(o++)/10;s.vz=v.getInt8(o++)/10}if(mask&32){s.hp=v.getUint8(o++);s.armor=v.getUint8(o++)}if(mask&64)s.state=v.getUint8(o++);if(mask&128)s.weapon=v.getUint8(o++);if(mask&256)s.shot=v.getUint8(o++);if(mask&512)s.skin=v.getUint8(o++);if(mask&1024)s.weaponSkin=v.getUint8(o++)}this.states.set(id,s);updated.push(s)}this.onSnapshot(tick,ack,updated)}
   private decodeEvents(v: DataView) {
     const rows: GameEvent[] = [];
     let o = 2;
@@ -115,6 +115,9 @@ export class Net {
           e.name = new TextDecoder().decode(new Uint8Array(v.buffer, v.byteOffset + o + 4, len));
           o += 4 + len; break;
         }
+        case 13:
+          e.player = v.getUint16(o, true); e.kind = v.getUint8(o + 2);
+          e.streak = v.getUint8(o + 3); e.ms = v.getUint16(o + 4, true); o += 6; break;
       }
       rows.push(e);
     }

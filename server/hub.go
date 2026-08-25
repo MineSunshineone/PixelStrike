@@ -30,7 +30,7 @@ type AdminPlayer struct {
 	Deaths uint16 `json:"deaths"`
 }
 
-func NewHub(w *World, s *Store) *Hub { return &Hub{World: w, Store: s, botCount: 6} }
+func NewHub(w *World, s *Store) *Hub { return &Hub{World: w, Store: s, botCount: 8} }
 
 func (h *Hub) Broadcast(msg []byte) {
 	h.mu.Lock()

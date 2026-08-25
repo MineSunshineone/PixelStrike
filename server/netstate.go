@@ -1,8 +1,12 @@
 package main
 
-import "math"
+import (
+	"math"
+	"sort"
+	"time"
+)
 
-const maxSnapshotBytes = 2300 // ~69 KB/s at 30 Hz, before small event traffic.
+const maxSnapshotBytes = 4096 // ~123 KB/s at 30 Hz, still far under the 100 Mbps budget.
 
 type quantState struct {
 	x, y, z                                          int16
@@ -81,31 +85,29 @@ func (p *Player) BuildSnapshot(tick uint32, players []*Player, states []quantSta
 	countAt := len(w.b) - 1
 	count := 0
 
+	type cand struct {
+		i      int
+		distSq float64
+	}
+	cands := make([]cand, 0, len(players))
 	for i, other := range players {
-		isSelf := other.Id == p.Id
-		dx := other.Pos.X - p.Pos.X
-		dz := other.Pos.Z - p.Pos.Z
-		distSq := dx*dx + dz*dz
-		if !isSelf {
-			switch {
-			case distSq <= 48*48:
-			case distSq <= 112*112:
-				if tick%6 != 0 {
-					continue
-				}
-			case distSq <= 180*180:
-				moving := other.Vel.X*other.Vel.X+other.Vel.Z*other.Vel.Z > .0025
-				if moving && tick%12 != 0 || !moving && tick%60 != 0 {
-					continue
-				}
-			default:
-				continue
-			}
+		if ok, distSq := snapshotVisible(&p.PlayerState, &other.PlayerState, tick); ok {
+			cands = append(cands, cand{i: i, distSq: distSq})
 		}
+	}
+	sort.Slice(cands, func(a, b int) bool {
+		if cands[a].distSq != cands[b].distSq {
+			return cands[a].distSq < cands[b].distSq
+		}
+		return players[cands[a].i].Id < players[cands[b].i].Id
+	})
+
+	for _, c := range cands {
 		if len(w.b) >= maxSnapshotBytes {
 			break
 		}
-		cur := states[i]
+		other := players[c.i]
+		cur := states[c.i]
 		prev, seen := p.netCache[other.Id]
 		full := !seen || tick-p.netFullAt[other.Id] >= 120
 		if !appendStateDelta(w, other.Id, prev, cur, full) {
@@ -119,6 +121,33 @@ func (p *Player) BuildSnapshot(tick uint32, players []*Player, states []quantSta
 	}
 	w.b[countAt] = byte(count)
 	return w.Bytes()
+}
+
+func snapshotVisible(self, other *PlayerState, tick uint32) (bool, float64) {
+	if other.Id == self.Id {
+		return true, -1
+	}
+	dx := other.Pos.X - self.Pos.X
+	dz := other.Pos.Z - self.Pos.Z
+	distSq := dx*dx + dz*dz
+	recentShot := !other.LastShotAt.IsZero() && time.Since(other.LastShotAt) < 800*time.Millisecond
+	switch {
+	case distSq <= 42*42:
+		return true, distSq
+	case distSq <= 100*100:
+		return tick%4 == 0 || recentShot, distSq
+	case distSq <= 220*220:
+		if recentShot {
+			return tick%4 == 0, distSq
+		}
+		moving := other.Vel.X*other.Vel.X+other.Vel.Z*other.Vel.Z > .0025
+		if moving {
+			return tick%8 == 0, distSq
+		}
+		return tick%20 == 0, distSq
+	default:
+		return recentShot && tick%8 == 0, distSq
+	}
 }
 
 func (p *Player) snapshotBuffer(size int) []byte {
