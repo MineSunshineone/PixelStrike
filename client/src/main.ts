@@ -48,6 +48,7 @@ const weapons = new Weapons(camera, scene);
 weapons.onPlaySound = (name, vol, pitch) => audio.play(name, vol, pitch);
 let world: WorldView | null = null;
 let joined = false;
+let practice = false;
 let alive = false;
 let myName = '';
 let killerId = -1;
@@ -198,7 +199,7 @@ function clearCombatInput() {
   grenadePrimed = false;
   stopAiming();
   weapons.resetMotion();
-  if (joined && alive) net.sendInput(inputSeq++, 0, local.yaw, local.pitch);
+  if (joined && alive && !practice) net.sendInput(inputSeq++, 0, local.yaw, local.pitch);
   refreshWeaponHud();
 }
 
@@ -272,7 +273,7 @@ function startReload(t = performance.now(), notifyServer = true) {
   reloadPendingSlot = activeSlot;
   reloadPendingMag = weapons.ammoLocal;
   reloadPendingReserve = reserve;
-  if (notifyServer) net.sendReload();
+  if (notifyServer && !practice) net.sendReload();
   stopAiming();
 }
 
@@ -308,7 +309,7 @@ function selectSlot(slot: number) {
   mag = slot <= 2 ? slotMags[slot] : 0;
   reserve = slot <= 2 ? slotReserves[slot] : 0;
   weapons.ammoLocal = mag;
-  net.switchSlot(slot);
+  if (!practice) net.switchSlot(slot);
   audio.play('weapon_switch', 0.7);
   refreshWeaponHud();
 }
@@ -325,7 +326,7 @@ function throwGrenade() {
   nades--;
   grenadeOrigin.set(local.pos.x, local.eyeY(), local.pos.z);
   particles.spawnGrenade(net.yourId, grenadeOrigin, grenadeVelocity(grenadeVelocityVec));
-  net.sendGrenade(local.yaw, local.pitch);
+  if (!practice) net.sendGrenade(local.yaw, local.pitch);
   activeSlot = lastWeaponSlot;
   weapons.group.visible = true;
   audio.play('weapon_switch', 0.7);
@@ -516,7 +517,13 @@ hud.onPauseClick(() => {
   if (joined && !hud.isSettingsOpen()) void captureGame();
 });
 hud.onFlightToggle = () => {
-  if (joined && alive) net.toggleFlight();
+  if (!joined || !alive) return;
+  if (practice) {
+    local.flying = !local.flying;
+    hud.setFlightState(local.flying, true);
+  } else {
+    net.toggleFlight();
+  }
 };
 
 hud.onJoin = (name, primary, secondary, skin, primarySkin, secondarySkin) => {
@@ -545,14 +552,164 @@ hud.onJoin = (name, primary, secondary, skin, primarySkin, secondarySkin) => {
   audio.init();
 };
 
+interface DummyBox { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; head: boolean }
+interface DummyTarget { group: THREE.Group; boxes: DummyBox[] }
+const dummies: DummyTarget[] = [];
+
+function enterPractice() {
+  myName = '模拟练习';
+  practice = true;
+  joined = true;
+  alive = true;
+  killStreak = 0;
+  killerId = -1;
+  respawnAt = 0;
+  pointerUnlockRequested = false;
+  if (!world) {
+    const map = bundledMap as MapData;
+    world = new WorldView(scene, map);
+    world.clouds.visible = hud.quality !== 'low';
+    hud.setMap(map);
+  }
+  const map = bundledMap as MapData;
+  let spawn: [number, number, number] = map.spawns?.[0] ?? [0, 0, 0];
+  if (world && map.spawns) {
+    for (const s of map.spawns) {
+      if (canOccupy(world.boxes, local.pos.set(s[0], s[1], s[2]), PHYS.standingHeight)) {
+        spawn = s;
+        break;
+      }
+    }
+  }
+  local.pos.set(spawn[0], spawn[1], spawn[2]);
+  local.vel.set(0, 0, 0);
+  local.onGround = true;
+  local.flying = false;
+  local.yaw = Math.atan2(local.pos.x, local.pos.z);
+  local.pitch = 0;
+  const resolved = resolveLoadout(userPrimaryChoice, userSecondaryChoice);
+  primaryWeapon = resolved.primary;
+  secondaryWeapon = resolved.secondary;
+  primaryWeaponSkin = userPrimaryWeaponSkin === 3 ? 0 : userPrimaryWeaponSkin;
+  secondaryWeaponSkin = userSecondaryWeaponSkin === 3 ? 0 : userSecondaryWeaponSkin;
+  weapons.build(primaryWeapon, primaryWeaponSkin);
+  resetInventory(primaryWeapon, secondaryWeapon);
+  activeSlot = lastWeaponSlot = 1;
+  grenadePrimed = false;
+  mag = slotMags[1];
+  reserve = slotReserves[1];
+  nades = 1;
+  weapons.ammoLocal = mag;
+  weapons.group.visible = true;
+  refreshWeaponHud();
+  spawnDummies();
+  hud.setPractice();
+  hud.setFlightState(local.flying, true);
+  guardMatchHistory();
+  audio.init();
+  void lockPointer();
+}
+
+hud.onPractice = () => enterPractice();
+
+function spawnDummies() {
+  if (dummies.length || !world) return;
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xc9822b, roughness: 0.85 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xffce54, roughness: 0.7 });
+  const forward = new THREE.Vector3(-Math.sin(local.yaw), 0, -Math.cos(local.yaw)).normalize();
+  const right = new THREE.Vector3(-forward.z, 0, forward.x);
+  const groundY = 0;
+  const probe = new THREE.Vector3();
+  const rows: [number, number][] = [[12, 0], [18, 3.5], [12, -3.5], [24, 0], [30, 5]];
+  for (const [dist, lat] of rows) {
+    const cx = local.pos.x + forward.x * dist + right.x * lat;
+    const cz = local.pos.z + forward.z * dist + right.z * lat;
+    if (!canOccupy(world.boxes, probe.set(cx, groundY, cz), 0.6)) continue;
+    const group = new THREE.Group();
+    const boxes: DummyBox[] = [];
+    const addBox = (sx: number, sy: number, sz: number, w: number, h: number, d: number, mat: THREE.Material, head: boolean) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      mesh.position.set(cx + sx, groundY + sy + h / 2, cz + sz);
+      group.add(mesh);
+      boxes.push({
+        x0: cx + sx - w / 2, x1: cx + sx + w / 2,
+        y0: groundY + sy, y1: groundY + sy + h,
+        z0: cz + sz - d / 2, z1: cz + sz + d / 2,
+        head,
+      });
+    };
+    addBox(-0.18, 0, 0, 0.3, 0.72, 0.3, bodyMat, false);
+    addBox(0.18, 0, 0, 0.3, 0.72, 0.3, bodyMat, false);
+    addBox(0, 0.72, 0, 0.72, 0.72, 0.36, bodyMat, false);
+    addBox(-0.48, 0.78, 0, 0.22, 0.6, 0.22, bodyMat, false);
+    addBox(0.48, 0.78, 0, 0.22, 0.6, 0.22, bodyMat, false);
+    addBox(0, 1.44, 0, 0.34, 0.34, 0.34, headMat, true);
+    scene.add(group);
+    dummies.push({ group, boxes });
+  }
+}
+
+function raycastDummies(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number): { dist: number; head: boolean } | null {
+  let best = maxDist;
+  let hit: { dist: number; head: boolean } | null = null;
+  for (const t of dummies) {
+    for (const b of t.boxes) {
+      let tmin = -Infinity;
+      let tmax = Infinity;
+      if (dir.x !== 0) {
+        let t1 = (b.x0 - origin.x) / dir.x;
+        let t2 = (b.x1 - origin.x) / dir.x;
+        if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+        tmin = Math.max(tmin, t1);
+        tmax = Math.min(tmax, t2);
+      } else if (origin.x < b.x0 || origin.x > b.x1) continue;
+      if (dir.y !== 0) {
+        let t1 = (b.y0 - origin.y) / dir.y;
+        let t2 = (b.y1 - origin.y) / dir.y;
+        if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+        tmin = Math.max(tmin, t1);
+        tmax = Math.min(tmax, t2);
+      } else if (origin.y < b.y0 || origin.y > b.y1) continue;
+      if (dir.z !== 0) {
+        let t1 = (b.z0 - origin.z) / dir.z;
+        let t2 = (b.z1 - origin.z) / dir.z;
+        if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+        tmin = Math.max(tmin, t1);
+        tmax = Math.min(tmax, t2);
+      } else if (origin.z < b.z0 || origin.z > b.z1) continue;
+      if (tmin <= tmax && tmin >= 0 && tmin < best) {
+        best = tmin;
+        hit = { dist: tmin, head: b.head };
+      }
+    }
+  }
+  return hit;
+}
+
+function removeDummies() {
+  for (const t of dummies) {
+    scene.remove(t.group);
+    t.group.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        const m = o.material;
+        if (Array.isArray(m)) m.forEach((mm) => mm.dispose());
+        else m.dispose();
+      }
+    });
+  }
+  dummies.length = 0;
+}
+
 hud.onLoadoutChange = (p, s) => {
   userPrimaryChoice = p;
   userSecondaryChoice = s;
   const next = resolveLoadout(p, s);
-  net.setLoadout(next.primary, next.secondary, userPrimaryWeaponSkin, userSecondaryWeaponSkin);
+  if (!practice) net.setLoadout(next.primary, next.secondary, userPrimaryWeaponSkin, userSecondaryWeaponSkin);
 };
 hud.onExit = () => {
   joined = false;
+  practice = false;
   alive = false;
   respawnAt = 0;
   pointerUnlockRequested = true;
@@ -563,6 +720,7 @@ hud.onExit = () => {
   net.disconnect();
   hud.exitMatch();
   for (const id of [...remotes.ids()]) remotes.remove(id);
+  removeDummies();
   states.clear();
   roster.clear();
   names.clear();
@@ -975,7 +1133,7 @@ function frame(t: number) {
     }
     if (t - lastInput >= INPUT_INTERVAL) {
       lastInput = t - ((t - lastInput) % INPUT_INTERVAL);
-      net.sendInput(inputSeq++, local.keys | (aiming ? KEY.Aim : 0), local.yaw, local.pitch);
+      if (!practice) net.sendInput(inputSeq++, local.keys | (aiming ? KEY.Aim : 0), local.yaw, local.pitch);
     }
 
     const shouldFire = activeSlot !== 4 && ((WEAPONS[weapons.weaponId]?.automatic ?? false) ? fireHeld : firePressed);
@@ -1070,7 +1228,7 @@ function fire(mode: number, t: number) {
   const shotSample = (++shotSeq) & 0xff;
   const dir = shotDirection(localShotDir, local.yaw, local.pitch, spread, pellets > 1 ? shotSample * 17 : shotSample, weapons.weaponId, net.yourId);
   weapons.onFired(t, origin);
-  net.sendFire(shotSeq, net.lastServerTick, mode | (aiming ? 0x80 : 0), local.yaw, local.pitch);
+  if (!practice) net.sendFire(shotSeq, net.lastServerTick, mode | (aiming ? 0x80 : 0), local.yaw, local.pitch);
   mag = weapons.ammoLocal;
   if (isSniper(weapons.weaponId)) {
     stopAiming();
@@ -1084,10 +1242,22 @@ function fire(mode: number, t: number) {
       const pelletDir = i === 0 && !isShotgun(weapons.weaponId)
         ? dir
         : shotDirection(localPelletDir, local.yaw, local.pitch, spread, isShotgun(weapons.weaponId) ? shotSample : shotSample * 17 + i, weapons.weaponId, net.yourId, isShotgun(weapons.weaponId) ? i : undefined);
-      const dist = world?.raycastDistance(origin, pelletDir, 180) ?? 180;
+      let dist = world?.raycastDistance(origin, pelletDir, 180) ?? 180;
+      const dummy = raycastDummies(origin, pelletDir, dist);
+      let impactColor = 0xd6b36e;
+      let impactCount = pellets > 1 ? 3 : 5;
+      if (dummy) {
+        dist = dummy.dist;
+        if (i === 0) {
+          hud.hitMarker(dummy.head);
+          audio.play(dummy.head ? 'headshot_ding' : 'hitmarker', dummy.head ? 1 : 0.65, 1, 0, dummy.head);
+        }
+        impactColor = dummy.head ? 0xf2c14e : 0xd8574f;
+        impactCount = dummy.head ? 7 : 5;
+      }
       weapons.spawnTracer(origin, pelletDir, dist, true);
       if (dist < 180) {
-        particles.spawnImpact(impactPoint.copy(origin).addScaledVector(pelletDir, dist), impactNormal, 0xd6b36e, pellets > 1 ? 3 : 5);
+        particles.spawnImpact(impactPoint.copy(origin).addScaledVector(pelletDir, dist), impactNormal, impactColor, impactCount);
       }
     }
     applyRecoil(weapons.weaponId, patternShots, aiming);
@@ -1095,6 +1265,11 @@ function fire(mode: number, t: number) {
     weapons.onKnifeSlash();
     audio.play('knife_slash', 0.85);
     const dist = world?.raycastDistance(origin, dir, 2.0) ?? 2.0;
+    const dummy = raycastDummies(origin, dir, dist);
+    if (dummy) {
+      hud.hitMarker(false);
+      audio.play('hitmarker', 0.65, 1, 0, false);
+    }
     if (dist < 2.0) {
       particles.spawnImpact(impactPoint.copy(origin).addScaledVector(dir, dist), impactNormal, 0xd6b36e, 3);
     }

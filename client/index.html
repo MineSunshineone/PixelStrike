@@ -443,6 +443,9 @@
     }
     #join-btn:hover { background: var(--accent-hi); transform: translate(-1px, -1px); box-shadow: inset 0 -5px 0 #87521b, 7px 7px 0 #080a08; }
     #join-btn:active { transform: translate(2px, 3px); box-shadow: inset 0 -3px 0 #87521b, 2px 2px 0 #080a08; }
+    .deploy-action-wrap { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: stretch; }
+    #practice-join-btn { min-height: 58px; padding: 8px 18px; font: 700 15px var(--font-display); letter-spacing: .05em; white-space: nowrap; }
+    #settings-modal .dialog-actions { grid-template-columns: 1fr 1fr 1fr; }
 
     .section-head { display: flex; justify-content: space-between; align-items: end; gap: 10px; }
     .section-head h2 { font: 25px var(--font-display); letter-spacing: .04em; }
@@ -703,28 +706,47 @@
       position: fixed;
       left: 50%;
       top: 50%;
-      width: 2px;
-      height: 2px;
+      width: 0;
+      height: 0;
       transform: translate(-50%, -50%);
       pointer-events: none;
       contain: layout style;
       --spread: 3px;
       --crosshair-color: #f4f1e4;
+      --ch-size: 7px;
+      --ch-thickness: 2px;
+      --ch-dot: 2px;
     }
-    .ch-line, .ch-dot { position: absolute; left: 0; top: 0; background: var(--crosshair-color); box-shadow: 0 0 0 1px rgb(11 13 11 / .88); }
+    .ch-line, .ch-dot, .ch-ring { position: absolute; left: 0; top: 0; }
+    .ch-line, .ch-dot { background: var(--crosshair-color); }
     .ch-line { will-change: transform; transition: background-color 90ms linear, opacity 90ms linear; }
-    .ch-top, .ch-bot { width: 2px; height: 7px; }
-    .ch-top { transform: translate3d(0, calc(-100% - var(--spread)), 0); }
-    .ch-bot { transform: translate3d(0, calc(2px + var(--spread)), 0); }
-    .ch-left, .ch-right { width: 7px; height: 2px; }
-    .ch-left { transform: translate3d(calc(-100% - var(--spread)), 0, 0); }
-    .ch-right { transform: translate3d(calc(2px + var(--spread)), 0, 0); }
-    .ch-dot { width: 2px; height: 2px; background: var(--accent-hi); box-shadow: 0 0 0 1px rgb(11 13 11 / .9), 0 0 5px rgb(255 185 46 / .34); }
+    .ch-ring { box-sizing: border-box; }
+    .ch-top, .ch-bot { width: var(--ch-thickness); height: var(--ch-size); }
+    .ch-top { transform: translate3d(calc(var(--ch-thickness) / -2), calc(-100% - var(--spread)), 0); }
+    .ch-bot { transform: translate3d(calc(var(--ch-thickness) / -2), var(--spread), 0); }
+    .ch-left, .ch-right { width: var(--ch-size); height: var(--ch-thickness); }
+    .ch-left { transform: translate3d(calc(-100% - var(--spread)), calc(var(--ch-thickness) / -2), 0); }
+    .ch-right { transform: translate3d(var(--spread), calc(var(--ch-thickness) / -2), 0); }
+    .ch-dot { width: var(--ch-dot); height: var(--ch-dot); transform: translate3d(calc(var(--ch-dot) / -2), calc(var(--ch-dot) / -2), 0); box-shadow: 0 0 0 1px rgb(11 13 11 / .9), 0 0 5px rgb(255 185 46 / .34); }
+    .ch-ring { width: var(--ch-size); height: var(--ch-size); border: var(--ch-thickness) solid var(--crosshair-color); border-radius: 50%; transform: translate3d(calc(var(--ch-size) / -2), calc(var(--ch-size) / -2), 0); }
+    .crosshair-widget:not([data-custom-color]) .ch-dot, .crosshair-widget[data-custom-color="off"] .ch-dot { background: var(--accent-hi); }
+    .crosshair-widget[data-outline="on"] .ch-line { box-shadow: 0 0 0 1px rgb(11 13 11 / .88); }
+    .crosshair-widget[data-outline="off"] .ch-line { box-shadow: none; }
+    .crosshair-widget:not([data-outline]) .ch-line { box-shadow: 0 0 0 1px rgb(11 13 11 / .88); }
+    .crosshair-widget[data-dot="off"] .ch-dot { display: none; }
+    .crosshair-widget[data-style="cross"] .ch-dot { display: none; }
+    .crosshair-widget[data-style="t"] .ch-bot { display: none; }
+    .crosshair-widget[data-style="dot"] .ch-line, .crosshair-widget[data-style="dot"] .ch-ring { display: none; }
+    .crosshair-widget[data-style="dot"] .ch-dot { width: var(--ch-size); height: var(--ch-size); transform: translate3d(calc(var(--ch-size) / -2), calc(var(--ch-size) / -2), 0); }
+    .crosshair-widget[data-style="ring"] .ch-line, .crosshair-widget[data-style="ring"] .ch-dot { display: none; }
+    .crosshair-widget[data-style="none"] .ch-line, .crosshair-widget[data-style="none"] .ch-dot, .crosshair-widget[data-style="none"] .ch-ring { display: none; }
+    .crosshair-widget:not([data-style="ring"]) .ch-ring { display: none; }
     #crosshair[data-accuracy="warm"] { --crosshair-color: #efc464; }
     #crosshair[data-accuracy="wide"] { --crosshair-color: #df8068; }
     #crosshair[data-accuracy="wide"] .ch-line { opacity: .86; }
     #crosshair.reloading .ch-line { background: var(--accent-hi); opacity: 0.55; }
-    #crosshair.reloading .ch-dot { background: var(--accent-hi); transform: scale(1.6); box-shadow: 0 0 6px var(--accent-hi); }
+    #crosshair.reloading .ch-dot { background: var(--accent-hi); transform: translate3d(calc(var(--ch-dot) / -2), calc(var(--ch-dot) / -2), 0) scale(1.6); box-shadow: 0 0 6px var(--accent-hi); }
+    #crosshair[data-style="dot"].reloading .ch-dot { transform: translate3d(calc(var(--ch-size) / -2), calc(var(--ch-size) / -2), 0) scale(1.6); }
     #grenade-ready {
       position: fixed;
       left: 50%;
@@ -1116,7 +1138,77 @@
     #disconnect-overlay.upgrade .disconnect-progress::after { width: 100%; background: var(--accent); animation: upgrade-progress var(--upgrade-duration, 2s) linear forwards; transform-origin: left; }
     .dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
     .dialog-actions button { min-height: 42px; }
-    .settings-stack { display: grid; gap: 13px; margin-top: 16px; }
+    .settings-stack { display: grid; gap: 18px; margin-top: 16px; }
+    .settings-group { display: grid; gap: 11px; }
+    .settings-group-label {
+      margin: 0;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--line);
+      color: var(--accent-hi);
+      font: 700 11px var(--font-mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    #settings-modal .dialog { max-height: calc(100dvh - 36px); overflow-y: auto; }
+    .ch-color-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .ch-swatch {
+      position: relative;
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--line-strong);
+      border-radius: 0;
+      background: var(--panel-2);
+    }
+    .ch-swatch.active { border-color: var(--accent-hi); box-shadow: 0 0 0 2px var(--accent); }
+    .ch-swatch[data-color=""]::before, .ch-swatch[data-color=""]::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      background: var(--muted);
+    }
+    .ch-swatch[data-color=""]::before { width: 13px; height: 2px; transform: translate(-50%, -50%); }
+    .ch-swatch[data-color=""]::after { width: 2px; height: 13px; transform: translate(-50%, -50%); }
+    #ch-color-input {
+      width: 34px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+    .ch-toggle-grid { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+    .ch-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font: 700 11px var(--font-mono);
+      letter-spacing: .05em;
+      cursor: pointer;
+    }
+    .ch-toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+    .ch-preview-box {
+      position: relative;
+      min-height: 96px;
+      border: 1px dashed var(--line);
+      background: radial-gradient(circle at 50% 50%, #0d1413 0%, #131a16 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    #crosshair-preview {
+      position: relative;
+      width: 0;
+      height: 0;
+      --spread: 3px;
+      --crosshair-color: #f4f1e4;
+      --ch-size: 7px;
+      --ch-thickness: 2px;
+      --ch-dot: 2px;
+    }
     input[type="range"] {
       width: 100%;
       accent-color: var(--accent);
@@ -1186,6 +1278,8 @@
       .deploy-title { font-size: 44px; }
       .deploy-title span:last-child { font-size: .7em; }
       .loadout-grid, .dialog-actions { grid-template-columns: 1fr; }
+      #settings-modal .dialog-actions { grid-template-columns: 1fr; }
+      .deploy-action-wrap { grid-template-columns: 1fr; }
       .field.full { grid-column: auto; }
       .stat-grid { grid-template-columns: 1fr 1fr; }
       .metric { padding-inline: 7px; }
@@ -1322,6 +1416,7 @@
 
           <div class="deploy-action-wrap" style="margin-top: 10px;">
             <button id="join-btn" type="button">进入战场</button>
+            <button id="practice-join-btn" class="ghost-button" type="button" title="在空地图中测试准星与手感，不连接服务器">模拟练习</button>
           </div>
         </section>
 
@@ -1387,9 +1482,9 @@
       </svg>
     </div>
     <div id="player-labels" aria-hidden="true"></div>
-    <div id="crosshair" aria-hidden="true">
+    <div id="crosshair" class="crosshair-widget" aria-hidden="true">
       <div class="ch-line ch-top"></div><div class="ch-line ch-bot"></div>
-      <div class="ch-line ch-left"></div><div class="ch-line ch-right"></div><div class="ch-dot"></div>
+      <div class="ch-line ch-left"></div><div class="ch-line ch-right"></div><div class="ch-dot"></div><div class="ch-ring"></div>
     </div>
     <div id="sniper-scope" aria-hidden="true">
       <div class="scope-lens">
@@ -1517,38 +1612,106 @@
   <div id="settings-modal" class="overlay" role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <div class="dialog">
       <div class="dialog-label">CLIENT SETTINGS</div>
-      <h2 id="settings-title">控制与画质</h2>
+      <h2 id="settings-title">设置</h2>
       <div class="settings-stack">
-        <div class="field">
-          <label for="sens-slider">鼠标灵敏度</label>
-          <input id="sens-slider" type="range" min="10" max="100" value="45">
-        </div>
-        <div class="field">
-          <label for="ads-sens-slider">开镜灵敏度</label>
-          <input id="ads-sens-slider" type="range" min="25" max="125" value="85">
-        </div>
-        <div class="field">
-          <label for="vol-slider">音效音量</label>
-          <input id="vol-slider" type="range" min="0" max="100" value="80">
-        </div>
-        <div class="field">
-          <label for="quality-select">渲染画质</label>
-          <select class="control" id="quality-select">
-            <option value="low">流畅 / 0.75 ×</option>
-            <option value="medium" selected>平衡 / 1.0 ×</option>
-            <option value="high">超清 / DPR 1.5</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="fov-slider">视野 FOV</label>
-          <input id="fov-slider" type="range" min="55" max="100" value="62">
-        </div>
-        <div class="field">
-          <label for="bob-slider">持枪手感</label>
-          <input id="bob-slider" type="range" min="0" max="100" value="55">
-        </div>
+        <section class="settings-group">
+          <h3 class="settings-group-label">瞄准 / AIM</h3>
+          <div class="field">
+            <label for="sens-slider">鼠标灵敏度</label>
+            <input id="sens-slider" type="range" min="10" max="100" value="45">
+          </div>
+          <div class="field">
+            <label for="ads-sens-slider">开镜灵敏度</label>
+            <input id="ads-sens-slider" type="range" min="25" max="125" value="85">
+          </div>
+        </section>
+
+        <section class="settings-group">
+          <h3 class="settings-group-label">准星 / CROSSHAIR</h3>
+          <div class="field">
+            <label for="ch-style-select">准星样式</label>
+            <select class="control" id="ch-style-select">
+              <option value="cross-dot" selected>十字 + 中心点</option>
+              <option value="cross">经典十字</option>
+              <option value="t">T 形</option>
+              <option value="dot">单点</option>
+              <option value="ring">圆环</option>
+              <option value="none">关闭准星</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>准星颜色</label>
+            <div class="ch-color-row">
+              <button class="ch-swatch active" type="button" data-color="" aria-label="默认动态颜色" title="默认（随精度动态变色）"></button>
+              <button class="ch-swatch" type="button" data-color="#f4f1e4" style="background:#f4f1e4" aria-label="经典白" title="经典白"></button>
+              <button class="ch-swatch" type="button" data-color="#ef4444" style="background:#ef4444" aria-label="红" title="红"></button>
+              <button class="ch-swatch" type="button" data-color="#22c55e" style="background:#22c55e" aria-label="绿" title="绿"></button>
+              <button class="ch-swatch" type="button" data-color="#38bdf8" style="background:#38bdf8" aria-label="蓝" title="蓝"></button>
+              <button class="ch-swatch" type="button" data-color="#eab308" style="background:#eab308" aria-label="黄" title="黄"></button>
+              <button class="ch-swatch" type="button" data-color="#f97316" style="background:#f97316" aria-label="橙" title="橙"></button>
+              <input id="ch-color-input" type="color" value="#f4f1e4" aria-label="自定义颜色" title="自定义颜色">
+            </div>
+          </div>
+          <div class="field">
+            <label for="ch-size-slider">准星大小</label>
+            <input id="ch-size-slider" type="range" min="4" max="20" value="7">
+          </div>
+          <div class="field">
+            <label for="ch-thick-slider">准星粗细</label>
+            <input id="ch-thick-slider" type="range" min="1" max="5" value="2">
+          </div>
+          <div class="field">
+            <label for="ch-gap-slider">准星间距</label>
+            <input id="ch-gap-slider" type="range" min="0" max="12" value="3">
+          </div>
+          <div class="ch-toggle-grid">
+            <label class="ch-toggle"><input id="ch-dot-toggle" type="checkbox" checked><span>中心点</span></label>
+            <label class="ch-toggle"><input id="ch-outline-toggle" type="checkbox" checked><span>描边</span></label>
+            <label class="ch-toggle"><input id="ch-dynamic-toggle" type="checkbox" checked><span>动态准星</span></label>
+          </div>
+          <div class="field">
+            <label>准星预览</label>
+            <div class="ch-preview-box">
+              <div id="crosshair-preview" class="crosshair-widget" aria-hidden="true">
+                <div class="ch-line ch-top"></div><div class="ch-line ch-bot"></div>
+                <div class="ch-line ch-left"></div><div class="ch-line ch-right"></div>
+                <div class="ch-dot"></div><div class="ch-ring"></div>
+              </div>
+            </div>
+          </div>
+          <button class="ghost-button" id="ch-reset-btn" type="button">恢复默认准星</button>
+        </section>
+
+        <section class="settings-group">
+          <h3 class="settings-group-label">音效 / AUDIO</h3>
+          <div class="field">
+            <label for="vol-slider">音效音量</label>
+            <input id="vol-slider" type="range" min="0" max="100" value="80">
+          </div>
+        </section>
+
+        <section class="settings-group">
+          <h3 class="settings-group-label">画面 / GRAPHICS</h3>
+          <div class="field">
+            <label for="quality-select">渲染画质</label>
+            <select class="control" id="quality-select">
+              <option value="low">流畅 / 0.75 ×</option>
+              <option value="medium" selected>平衡 / 1.0 ×</option>
+              <option value="high">超清 / DPR 1.5</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fov-slider">视野 FOV</label>
+            <input id="fov-slider" type="range" min="55" max="100" value="62">
+          </div>
+          <div class="field">
+            <label for="bob-slider">持枪手感</label>
+            <input id="bob-slider" type="range" min="0" max="100" value="55">
+          </div>
+        </section>
       </div>
       <div class="dialog-actions">
+        <button class="secondary-button" id="practice-btn" type="button" title="用当前准星设置在空地图中测试手感">进入模拟</button>
         <button class="secondary-button" id="close-settings-btn" type="button">保存并返回</button>
         <button class="danger-button" id="exit-btn" type="button">退出战场</button>
       </div>
