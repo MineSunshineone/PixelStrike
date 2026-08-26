@@ -613,58 +613,46 @@ function setupTouchControls() {
   window.addEventListener('touchcancel', resetJoystick, { passive: true });
 
   // Camera Look Touch Dragging
-  let lookTouchId: number | null = null;
+  let lookPointerId: number | null = null;
   let lastLookX = 0;
   let lastLookY = 0;
 
-  window.addEventListener('touchstart', (e) => {
-    if (!joined || !alive || hud.isSettingsOpen()) return;
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      const t = e.changedTouches[i];
-      const target = t.target as HTMLElement | null;
-      if (target?.closest('button, select, input, .mc-slot, #touch-joystick-zone, #menu, .overlay, #scoreboard')) continue;
-      if (lookTouchId === null) {
-        lookTouchId = t.identifier;
-        lastLookX = t.clientX;
-        lastLookY = t.clientY;
-      }
+  window.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch' || !joined || !alive || hud.isSettingsOpen()) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('button, select, input, .mc-slot, #touch-joystick-zone, #menu, .overlay, #scoreboard')) return;
+    if (lookPointerId === null) {
+      lookPointerId = e.pointerId;
+      lastLookX = e.clientX;
+      lastLookY = e.clientY;
     }
   }, { passive: true });
 
-  window.addEventListener('touchmove', (e) => {
-    if (!joined || !alive || lookTouchId === null || hud.isSettingsOpen() || hud.isPaused()) return;
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      const t = e.changedTouches[i];
-      if (t.identifier === lookTouchId) {
-        const dx = t.clientX - lastLookX;
-        const dy = t.clientY - lastLookY;
-        lastLookX = t.clientX;
-        lastLookY = t.clientY;
-        if (Math.abs(dx) > 300 || Math.abs(dy) > 300) return;
-        const adsScale = aiming ? (Math.tan(camera.fov * Math.PI / 360) / Math.tan(hud.hipFov * Math.PI / 360)) * hud.adsSensitivity : 1;
-        const sens = hud.touchSensitivity * adsScale;
-        local.yaw -= dx * sens;
-        local.pitch = Math.max(-1.45, Math.min(1.45, local.pitch - dy * sens));
-        mouseX = Math.max(-160, Math.min(160, mouseX + dx));
-        mouseY = Math.max(-160, Math.min(160, mouseY + dy));
-      }
-    }
+  window.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== lookPointerId || !joined || !alive || hud.isSettingsOpen() || hud.isPaused()) return;
+    const dx = e.clientX - lastLookX;
+    const dy = e.clientY - lastLookY;
+    lastLookX = e.clientX;
+    lastLookY = e.clientY;
+    if (Math.abs(dx) > 300 || Math.abs(dy) > 300) return;
+    const adsScale = aiming ? (Math.tan(camera.fov * Math.PI / 360) / Math.tan(hud.hipFov * Math.PI / 360)) * hud.adsSensitivity : 1;
+    const sens = hud.touchSensitivity * adsScale;
+    local.yaw -= dx * sens;
+    local.pitch = Math.max(-1.45, Math.min(1.45, local.pitch - dy * sens));
+    mouseX = Math.max(-160, Math.min(160, mouseX + dx));
+    mouseY = Math.max(-160, Math.min(160, mouseY + dy));
   }, { passive: true });
 
-  const stopLook = (e: TouchEvent) => {
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      if (e.changedTouches[i].identifier === lookTouchId) {
-        lookTouchId = null;
-        break;
-      }
-    }
+  const stopLook = (e: PointerEvent) => {
+    if (e.pointerId === lookPointerId) lookPointerId = null;
   };
-  window.addEventListener('touchend', stopLook, { passive: true });
-  window.addEventListener('touchcancel', stopLook, { passive: true });
+  window.addEventListener('pointerup', stopLook, { passive: true });
+  window.addEventListener('pointercancel', stopLook, { passive: true });
 
   // Fire Button
   const fireBtn = document.getElementById('btn-touch-fire');
-  fireBtn?.addEventListener('touchstart', (e) => {
+  fireBtn?.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
     e.preventDefault();
     e.stopPropagation();
     if (!alive) return;
@@ -675,15 +663,17 @@ function setupTouchControls() {
     }
     fireHeld = true;
     firePressed = true;
+    fireBtn.setPointerCapture(e.pointerId);
     fireBtn.classList.add('active');
-  }, { passive: false });
-  const stopFire = (e: TouchEvent) => {
+  });
+  const stopFire = (e: PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
     e.preventDefault();
     fireHeld = false;
     fireBtn?.classList.remove('active');
   };
-  fireBtn?.addEventListener('touchend', stopFire, { passive: false });
-  fireBtn?.addEventListener('touchcancel', stopFire, { passive: false });
+  fireBtn?.addEventListener('pointerup', stopFire);
+  fireBtn?.addEventListener('pointercancel', stopFire);
 
   // Aim Button
   const aimBtn = document.getElementById('btn-touch-aim');
@@ -1425,8 +1415,8 @@ function frame(t: number) {
       }
     }
 
-    const shouldFire = activeSlot !== 4 && ((WEAPONS[weapons.weaponId]?.automatic ?? false) ? fireHeld : firePressed);
-    if (shouldFire && (document.pointerLockElement === renderer.domElement || document.body.classList.contains('touch-device'))) {
+    const shouldFire = activeSlot !== 4 && (firePressed || !!WEAPONS[weapons.weaponId]?.automatic && fireHeld);
+    if (shouldFire) {
       if (reloadPendingSlot !== activeSlot && weapons.canFire(t)) {
         fire(0, t);
       } else if (firePressed && reloadPendingSlot !== activeSlot && weapons.ammoLocal === 0 && !weapons.isReloading(t) && t >= weapons.nextFireAt && weapons.weaponId !== 6) {
