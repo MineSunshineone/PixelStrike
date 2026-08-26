@@ -249,7 +249,7 @@ func TestReloadAfterRejectedLastRoundRefillsMagazine(t *testing.T) {
 
 func TestGrenadeThrowConsumesOnceAndEmitsTrajectory(t *testing.T) {
 	r := &Room{}
-	p := &PlayerState{Id: 7, Alive: true, Grenades: 1}
+	p := &PlayerState{Id: 7, Alive: true, Crouch: true, Grenades: 1}
 	now := time.Unix(1, 0)
 	r.ThrowGrenade(p, .4, .2, now)
 	r.ThrowGrenade(p, .4, .2, now)
@@ -257,7 +257,7 @@ func TestGrenadeThrowConsumesOnceAndEmitsTrajectory(t *testing.T) {
 		t.Fatalf("duplicate grenade throw: grenades=%d live=%d events=%d", p.Grenades, len(r.Grenades), len(r.pending))
 	}
 	e := r.pending[0]
-	if e.Type != EvNadeThrow || e.Player != p.Id || e.Dir.X == 0 || e.Dir.Y == 0 || e.Dir.Z == 0 {
+	if e.Type != EvNadeThrow || e.Player != p.Id || math.Abs(math.Hypot(e.Dir.X, e.Dir.Z)-math.Cos(.2)*GrenadeThrowSpeed) > 1e-9 || e.Dir.Y <= GrenadeLift || e.Origin.Y != CrouchEyeH {
 		t.Fatalf("grenade trajectory event missing: %#v", e)
 	}
 }
@@ -306,16 +306,25 @@ func TestRevengeShotHeadshotsAnyoneOnScreen(t *testing.T) {
 	}
 }
 
-func TestKnifeAttackDoesNotRequireAmmo(t *testing.T) {
+func TestKnifeAttackDoesNotRequireAmmoAndRespectsCadence(t *testing.T) {
 	r := &Room{World: &World{}, history: make(map[uint16]*poseHistory)}
 	attacker := &Player{PlayerState: PlayerState{Id: 1, Alive: true, IsBot: true, HP: MaxHP, Pos: Vec3{}}}
-	victim := &Player{PlayerState: PlayerState{Id: 2, Alive: true, IsBot: true, HP: MaxHP, Pos: Vec3{Z: -1.2}}}
+	victim := &Player{PlayerState: PlayerState{Id: 2, Alive: true, IsBot: true, HP: MaxHP, Pos: Vec3{Z: -1.2}, Yaw: math.Pi}}
 	attacker.ApplyLoadout(3, 0)
 	attacker.SwitchSlot(3)
 	attacker.NextFire = time.Time{}
 	r.Players = []*Player{attacker, victim}
-	if !r.TryFire(&attacker.PlayerState, 0, 0, 0, 0, 1, time.Unix(1, 0)) || victim.HP >= MaxHP {
-		t.Fatalf("knife attack failed without ammo: accepted=%v hp=%d", attacker.HasShot, victim.HP)
+	start := time.Unix(1, 0)
+	if !r.TryFire(&attacker.PlayerState, 0, 0, 0, 0, 1, start) || victim.HP != 66 || attacker.NextFire.Sub(start) != KnifeSlashInterval {
+		t.Fatalf("light knife attack failed: hp=%d next=%v", victim.HP, attacker.NextFire.Sub(start))
+	}
+	victim.HP, victim.Alive = MaxHP, true
+	heavyAt := start.Add(KnifeSlashInterval)
+	if !r.TryFire(&attacker.PlayerState, 0, 0, 1, 0, 2, heavyAt) || victim.HP != 45 || attacker.NextFire.Sub(heavyAt) != KnifeHeavyInterval {
+		t.Fatalf("heavy knife attack failed: hp=%d next=%v", victim.HP, attacker.NextFire.Sub(heavyAt))
+	}
+	if r.TryFire(&attacker.PlayerState, 0, 0, 0, 0, 3, heavyAt.Add(KnifeHeavyInterval-time.Millisecond)) || !r.TryFire(&attacker.PlayerState, 0, 0, 0, 0, 3, heavyAt.Add(KnifeHeavyInterval)) {
+		t.Fatal("knife cooldown accepted an early swing or rejected an on-time swing")
 	}
 }
 

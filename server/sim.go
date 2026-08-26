@@ -34,7 +34,7 @@ var Weapons = []WeaponDef{
 	{3, "AK-47", 33, 4.0, 600, .46, 1.85, .17, .92, .78, 45, 135, 2200, true, 1},
 	{4, "M4A4", 29, 3.5, 690, .34, 1.55, .12, .93, .72, 45, 135, 2100, true, 1},
 	{5, "AWP", 103, 1.25, 32, .06, 4.80, 0, .76, .98, 8, 45, 2800, false, 1},
-	{6, "Knife", 34, 1, 150, 0, 0, 0, 1.08, 1, 0, 0, 0, false, 1},
+	{6, "Knife", 34, 1, 150, 0, 0, 0, 1.08, 1, 0, 0, 0, true, 1},
 	{7, "USP-S", 24, 3.6, 400, .24, 1.05, .10, 1.0, .62, 18, 36, 1700, false, 1},
 	{8, "UMP-45", 27, 2.8, 620, .48, 1.42, .085, .97, .72, 38, 150, 2100, true, 1},
 	{9, "FAMAS", 29, 3.2, 720, .38, 1.58, .135, .94, .68, 38, 135, 2200, true, 1},
@@ -72,6 +72,10 @@ const (
 	SpawnProtectS               = 2 * time.Second
 	AWPScopeTime                = 320 * time.Millisecond
 	RespawnDelayS               = 3 * time.Second
+	KnifeSlashInterval          = 400 * time.Millisecond
+	KnifeHeavyInterval          = time.Second
+	GrenadeThrowSpeed           = 28.0
+	GrenadeLift                 = 4.2
 	EyeHeight                   = 1.7
 	CrouchEyeH                  = 1.12
 	StandingHeight              = 2.1
@@ -338,8 +342,11 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 		p.setActiveAmmo(mag-1, reserve)
 	}
 	gap := time.Duration(60 / def.Rpm * float64(time.Second))
-	if weapon == 6 && mode&1 != 0 {
-		gap = time.Second
+	if weapon == 6 {
+		gap = KnifeSlashInterval
+		if mode&1 != 0 {
+			gap = KnifeHeavyInterval
+		}
 	}
 	if p.NextFire.IsZero() || now.Sub(p.NextFire) >= gap {
 		p.NextFire = now.Add(gap)
@@ -1073,7 +1080,11 @@ func (r *Room) ThrowGrenade(p *PlayerState, yaw, pitch float64, now time.Time) {
 	p.Grenades--
 	p.NextGrenadeAt = now.Add(2 * time.Second)
 	cp := math.Cos(pitch)
-	g := &Grenade{Id: r.nextNadeId, ThrowerId: p.Id, Pos: Vec3{p.Pos.X, p.Pos.Y + EyeHeight, p.Pos.Z}, Vel: Vec3{-math.Sin(yaw) * cp * 22, math.Sin(pitch)*22 + 3.2, -math.Cos(yaw) * cp * 22}, ExplodesAt: now.Add(1800 * time.Millisecond), Active: true}
+	originY := p.Pos.Y + EyeHeight
+	if p.Crouch {
+		originY = p.Pos.Y + CrouchEyeH
+	}
+	g := &Grenade{Id: r.nextNadeId, ThrowerId: p.Id, Pos: Vec3{p.Pos.X, originY, p.Pos.Z}, Vel: Vec3{-math.Sin(yaw) * cp * GrenadeThrowSpeed, math.Sin(pitch)*GrenadeThrowSpeed + GrenadeLift, -math.Cos(yaw) * cp * GrenadeThrowSpeed}, ExplodesAt: now.Add(1800 * time.Millisecond), Active: true}
 	r.nextNadeId++
 	r.Grenades = append(r.Grenades, g)
 	r.Emit(Event{Type: EvNadeThrow, Player: p.Id, Origin: g.Pos, Dir: g.Vel})

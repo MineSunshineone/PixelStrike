@@ -71,6 +71,7 @@ const INPUT_INTERVAL = 1000 / 60;
 const SPEED_BOOST_MULTIPLIER = 1.35;
 let fireHeld = false;
 let firePressed = false;
+let knifeHeavyQueued = false;
 let mouseX = 0;
 let mouseY = 0;
 let mag = 30;
@@ -101,6 +102,10 @@ let userSecondaryWeaponSkin = 3;
 const PRIMARY_IDS = [3, 4, 2, 5, 8, 9, 10, 11, 12];
 const SECONDARY_IDS = [0, 1, 7];
 const CROSSHAIR_RECOVERY = [15, 8, 18, 11, 14, 7, 14, 17, 15, 16, 15, 9, 10] as const;
+const GRENADE_THROW_SPEED = 28;
+const GRENADE_LIFT = 4.2;
+const GRENADE_PREVIEW_STEPS = 45;
+const GRENADE_PREVIEW_DT = 1.8 / GRENADE_PREVIEW_STEPS;
 
 function resolveLoadout(p: number, s: number): { primary: number; secondary: number } {
   const actualPrimary = p === -1 ? PRIMARY_IDS[Math.floor(Math.random() * PRIMARY_IDS.length)] : p;
@@ -135,6 +140,21 @@ const grenadeVelocityVec = new THREE.Vector3();
 const shotRight = new THREE.Vector3();
 const shotUp = new THREE.Vector3();
 const cameraCorrection = new THREE.Vector3();
+const grenadePreviewPositions = new Float32Array((GRENADE_PREVIEW_STEPS + 1) * 3);
+const grenadePreviewGeometry = new THREE.BufferGeometry();
+const grenadePreviewPositionAttr = new THREE.BufferAttribute(grenadePreviewPositions, 3);
+grenadePreviewPositionAttr.setUsage(THREE.DynamicDrawUsage);
+grenadePreviewGeometry.setAttribute('position', grenadePreviewPositionAttr);
+const grenadePreviewMaterial = new THREE.LineDashedMaterial({ color: 0xffd166, transparent: true, opacity: 0.95, dashSize: 0.34, gapSize: 0.14, depthTest: false });
+const grenadePreview = new THREE.Line(grenadePreviewGeometry, grenadePreviewMaterial);
+grenadePreview.visible = false;
+grenadePreview.frustumCulled = false;
+grenadePreview.renderOrder = 4;
+scene.add(grenadePreview);
+const grenadePreviewPos = new THREE.Vector3();
+const grenadePreviewVel = new THREE.Vector3();
+const grenadePreviewDelta = new THREE.Vector3();
+const grenadePreviewDir = new THREE.Vector3();
 
 function resize() {
   const ratio = hud.quality === 'low' ? 0.75 : hud.quality === 'high' ? Math.min(window.devicePixelRatio, 1.5) : 1;
@@ -199,11 +219,55 @@ function refreshWeaponHud() {
   if (activeSlot === 3) hud.setAmmoDisplay('KNIFE', '—', '');
   else if (activeSlot === 4) hud.setAmmoDisplay('HE', String(nades), grenadePrimed ? 'PIN' : '');
   else hud.setAmmoDisplay(WEAPONS[weapons.weaponId]?.name ?? '', String(mag), String(reserve));
+  const touchAimLabel = document.querySelector('#btn-touch-aim span');
+  if (touchAimLabel) touchAimLabel.textContent = activeSlot === 3 ? '重击' : '开镜';
 }
 
 function grenadeVelocity(out: THREE.Vector3) {
   const cp = Math.cos(local.pitch);
-  return out.set(-Math.sin(local.yaw) * cp * 22, Math.sin(local.pitch) * 22 + 3.2, -Math.cos(local.yaw) * cp * 22);
+  return out.set(-Math.sin(local.yaw) * cp * GRENADE_THROW_SPEED, Math.sin(local.pitch) * GRENADE_THROW_SPEED + GRENADE_LIFT, -Math.cos(local.yaw) * cp * GRENADE_THROW_SPEED);
+}
+
+function updateGrenadePreview(t: number) {
+  if (!joined || !alive || activeSlot !== 4 || !grenadePrimed) {
+    grenadePreview.visible = false;
+    return;
+  }
+  grenadePreview.visible = true;
+  grenadePreviewPos.set(local.pos.x, local.eyeY(), local.pos.z);
+  grenadeVelocity(grenadePreviewVel);
+  let count = 1;
+  grenadePreviewPositions[0] = grenadePreviewPos.x;
+  grenadePreviewPositions[1] = grenadePreviewPos.y;
+  grenadePreviewPositions[2] = grenadePreviewPos.z;
+  for (let i = 0; i < GRENADE_PREVIEW_STEPS; i++) {
+    grenadePreviewVel.y += PHYS.gravity * GRENADE_PREVIEW_DT;
+    grenadePreviewDelta.copy(grenadePreviewVel).multiplyScalar(GRENADE_PREVIEW_DT);
+    const travel = grenadePreviewDelta.length();
+    if (world && travel > 0) {
+      grenadePreviewDir.copy(grenadePreviewDelta).multiplyScalar(1 / travel);
+      const hit = world.raycastDistance(grenadePreviewPos, grenadePreviewDir, travel);
+      if (hit < travel) {
+        grenadePreviewPos.addScaledVector(grenadePreviewDir, Math.max(0, hit - 0.03));
+        const offset = count++ * 3;
+        grenadePreviewPositions[offset] = grenadePreviewPos.x;
+        grenadePreviewPositions[offset + 1] = grenadePreviewPos.y;
+        grenadePreviewPositions[offset + 2] = grenadePreviewPos.z;
+        break;
+      }
+    }
+    grenadePreviewPos.add(grenadePreviewDelta);
+    if (grenadePreviewPos.y < 0.09) grenadePreviewPos.y = 0.09;
+    const offset = count++ * 3;
+    grenadePreviewPositions[offset] = grenadePreviewPos.x;
+    grenadePreviewPositions[offset + 1] = grenadePreviewPos.y;
+    grenadePreviewPositions[offset + 2] = grenadePreviewPos.z;
+    if (grenadePreviewPos.y <= 0.09) break;
+  }
+  grenadePreviewGeometry.setDrawRange(0, count);
+  grenadePreviewPositionAttr.needsUpdate = true;
+  grenadePreview.computeLineDistances();
+  grenadePreviewMaterial.opacity = 0.78 + Math.sin(t * 0.008) * 0.2;
 }
 function clearCombatInput() {
   keys.clear();
@@ -215,6 +279,7 @@ function clearCombatInput() {
   touchCrouch = false;
   fireHeld = false;
   firePressed = false;
+  knifeHeavyQueued = false;
   grenadePrimed = false;
   stopAiming();
   weapons.resetMotion();
@@ -310,6 +375,7 @@ function selectSlot(slot: number) {
   if (slot === 4 ? nades <= 0 : slot < 1 || slot > 3) return;
   fireHeld = false;
   firePressed = false;
+  knifeHeavyQueued = false;
   patternShots = 0;
   lastPatternShot = 0;
   weapons.nextFireAt = Math.max(weapons.nextFireAt, performance.now() + 220);
@@ -454,12 +520,16 @@ window.addEventListener('mousedown', (e) => {
   if (e.button === 0) {
     fireHeld = true;
     firePressed = true;
-  } else if (e.button === 2 && weapons.weaponId !== 6) {
-    if (isSniper(weapons.weaponId) && awpRescopeAt) return;
-    if (aiming) stopAiming();
-    else {
-      aimStartedAt = performance.now();
-      aiming = true;
+  } else if (e.button === 2) {
+    if (weapons.weaponId === 6) {
+      knifeHeavyQueued = true;
+    } else {
+      if (isSniper(weapons.weaponId) && awpRescopeAt) return;
+      if (aiming) stopAiming();
+      else {
+        aimStartedAt = performance.now();
+        aiming = true;
+      }
     }
   }
 }, { capture: true });
@@ -673,7 +743,12 @@ function setupTouchControls() {
 
   const aimBtn = document.getElementById('btn-touch-aim');
   bindPress(aimBtn, () => {
-    if (!alive || weapons.weaponId === 6 || isSniper(weapons.weaponId) && awpRescopeAt) return;
+    if (!alive) return;
+    if (weapons.weaponId === 6) {
+      knifeHeavyQueued = true;
+      return;
+    }
+    if (isSniper(weapons.weaponId) && awpRescopeAt) return;
     if (aiming) stopAiming();
     else {
       aimStartedAt = performance.now();
@@ -1461,7 +1536,12 @@ function frame(t: number) {
     }
 
     const shouldFire = activeSlot !== 4 && (firePressed || !!WEAPONS[weapons.weaponId]?.automatic && fireHeld);
-    if (shouldFire) {
+    if (weapons.weaponId === 6 && knifeHeavyQueued) {
+      if (weapons.canFire(t)) {
+        fire(1, t);
+        knifeHeavyQueued = false;
+      }
+    } else if (shouldFire) {
       if (reloadPendingSlot !== activeSlot && weapons.canFire(t)) {
         fire(0, t);
       } else if (firePressed && reloadPendingSlot !== activeSlot && weapons.ammoLocal === 0 && !weapons.isReloading(t) && t >= weapons.nextFireAt && weapons.weaponId !== 6) {
@@ -1536,6 +1616,7 @@ function frame(t: number) {
   const crosshairResponse = targetCrosshair > displayedCrosshair ? 24 : CROSSHAIR_RECOVERY[weapons.weaponId] ?? 12;
   displayedCrosshair += (targetCrosshair - displayedCrosshair) * (1 - Math.exp(-dt * crosshairResponse));
   hud.setCrosshair(displayedCrosshair);
+  updateGrenadePreview(t);
 
   if (joined) {
     remotes.update(t);
@@ -1562,7 +1643,7 @@ function fire(mode: number, t: number) {
   const pellets = Math.max(1, WEAPONS[weapons.weaponId]?.pellets ?? 1);
   const shotSample = (++shotSeq) & 0xff;
   const dir = shotDirection(localShotDir, local.yaw, local.pitch, spread, pellets > 1 ? shotSample * 17 : shotSample, weapons.weaponId, net.yourId);
-  weapons.onFired(t);
+  weapons.onFired(t, weapons.weaponId === 6 && (mode & 1) !== 0 ? 1000 : undefined);
   if (!practice) net.sendFire(shotSeq, net.lastServerTick, mode | (aiming ? 0x80 : 0), local.yaw, local.pitch);
   mag = weapons.ammoLocal;
   if (isSniper(weapons.weaponId)) {
@@ -1598,8 +1679,9 @@ function fire(mode: number, t: number) {
     }
     applyRecoil(weapons.weaponId, patternShots, aiming);
   } else {
-    weapons.onKnifeSlash();
-    audio.play('knife_slash', 0.85);
+    const heavy = (mode & 1) !== 0;
+    weapons.onKnifeSlash(heavy);
+    audio.play('knife_slash', heavy ? 1 : 0.85, heavy ? 0.72 : 1);
     const dist = world?.raycastDistance(origin, dir, 2.0) ?? 2.0;
     const dummy = raycastDummies(origin, dir, dist);
     if (dummy) {

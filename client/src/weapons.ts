@@ -96,6 +96,7 @@ export class Weapons {
   private curBobY = 0;
   private drawProgress = 1.0;
   private slashProgress = 0;
+  private slashHeavy = false;
   private boltCycleStartedAt = 0;
   private boltCycleUntil = 0;
   private shells: Shell[] = [];
@@ -305,8 +306,9 @@ export class Weapons {
     this.handRGroup.rotation.set(0, 0, 0);
   }
 
-  onKnifeSlash() {
-    this.slashProgress = 1.0;
+  onKnifeSlash(heavy = false) {
+    this.slashProgress = 1;
+    this.slashHeavy = heavy;
   }
 
   resetMotion() {
@@ -316,9 +318,9 @@ export class Weapons {
     this.curBobY = 0;
   }
 
-  onFired(t: number) {
+  onFired(t: number, intervalOverride?: number) {
     const def = WEAPONS[this.weaponId] ?? WEAPONS[0];
-    const interval = 60000 / def.rpm;
+    const interval = intervalOverride ?? 60000 / def.rpm;
     this.nextFireAt = this.nextFireAt > 0 && t - this.nextFireAt < interval ? this.nextFireAt + interval : t + interval;
     if (isSniper(this.weaponId)) {
       this.boltCycleStartedAt = t;
@@ -403,11 +405,12 @@ export class Weapons {
     this.drawProgress = Math.min(1, this.drawProgress + dt * 5.5);
     const drawDip = Math.sin((1 - this.drawProgress) * Math.PI * 0.5);
 
-    // Dynamic, wide tactical knife slash arc
+    // Dynamic knife arcs: quick repeated slashes and a slower, heavier right-click swing.
     if (this.slashProgress > 0) {
-      this.slashProgress = Math.max(0, this.slashProgress - dt * 4.2);
+      this.slashProgress = Math.max(0, this.slashProgress - dt * (this.slashHeavy ? 2.2 : 5.6));
+      if (this.slashProgress === 0) this.slashHeavy = false;
     }
-    const slashPhase = this.slashProgress > 0 ? Math.sin((1 - this.slashProgress) * Math.PI) : 0;
+    const slashPhase = this.slashProgress > 0 ? Math.sin((1 - this.slashProgress) * Math.PI) * (this.slashHeavy ? 1.45 : 1) : 0;
     // Continuous, jitter-free viewmodel bobbing with target lerp
     if (moving && !isAiming && !reloading) this.bobT += dt * 6.2;
     const bob = Math.max(0, Math.min(1, bobScale));
