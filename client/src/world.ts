@@ -744,7 +744,7 @@ export function moveAABB(
     let nextY = startY + dy;
     for (const b of boxes) {
       if (pos.x - PH >= b.x1 || pos.x + PH <= b.x0 || pos.z - PH >= b.z1 || pos.z + PH <= b.z0) continue;
-      if (dy < 0 && startY >= b.y1 - EPS && nextY < b.y1) {
+      if (dy < 0 && startY >= b.y1 - EPS && nextY <= b.y1 + EPS) {
         nextY = Math.max(nextY, b.y1 + EPS);
         vel.y = 0;
         grounded = true;

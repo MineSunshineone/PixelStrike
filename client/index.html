@@ -1354,7 +1354,7 @@
     .touch-action-btn {
       position: absolute;
       pointer-events: auto;
-      touch-action: manipulation;
+      touch-action: none;
       user-select: none;
       -webkit-user-select: none;
       display: flex;
@@ -1431,6 +1431,31 @@
       width: 48px;
       height: 48px;
     }
+    #touch-layout-toolbar {
+      position: fixed;
+      left: 50%;
+      top: max(12px, env(safe-area-inset-top, 12px));
+      z-index: 80;
+      display: none;
+      gap: 8px;
+      transform: translateX(-50%);
+      pointer-events: auto;
+    }
+    #touch-layout-toolbar button { min-height: 40px; padding: 8px 14px; }
+    body.touch-layout-edit #touch-layout-toolbar { display: flex; }
+    body.touch-layout-edit #hud { z-index: 100; }
+    body.touch-layout-edit #menu { visibility: hidden; }
+    body.touch-layout-edit #hud > :not(#touch-controls) { visibility: hidden; }
+    body.touch-layout-edit #touch-controls { display: block; background: rgb(5 7 5 / .58); }
+    body.touch-layout-edit #touch-top-bar,
+    body.touch-layout-edit #touch-joystick-zone,
+    body.touch-layout-edit .touch-action-btn {
+      outline: 2px dashed var(--accent-hi);
+      outline-offset: 3px;
+    }
+    body.touch-layout-edit #touch-top-bar,
+    body.touch-layout-edit #touch-joystick-zone,
+    body.touch-layout-edit .touch-action-btn { cursor: move; }
     .score-actions {
       display: flex;
       align-items: center;
@@ -1604,8 +1629,6 @@
       #touch-action-cluster {
         right: max(6px, env(safe-area-inset-right, 6px));
         bottom: max(6px, env(safe-area-inset-bottom, 6px));
-        transform: scale(0.8);
-        transform-origin: bottom right;
       }
       #menu {
         padding: 6px;
@@ -1939,6 +1962,10 @@
           </div>
         </button>
       </div>
+      <div id="touch-layout-toolbar" aria-label="触控布局编辑">
+        <button id="touch-layout-reset" class="secondary-button" type="button">恢复默认</button>
+        <button id="touch-layout-save" class="secondary-button" type="button">保存位置</button>
+      </div>
     </div>
   </div>
 
@@ -1980,6 +2007,7 @@
       <div class="dialog-actions">
         <button id="pause-resume-btn" class="secondary-button" type="button">继续战斗</button>
         <button id="pause-flight-btn" class="secondary-button" type="button" aria-pressed="false" disabled>中国人能飞</button>
+        <button id="pause-settings-btn" class="secondary-button" type="button">设置</button>
         <button id="pause-exit-btn" class="danger-button" type="button">退出战场</button>
       </div>
     </div>
@@ -2004,6 +2032,7 @@
             <label for="touch-sens-slider">触屏滑动灵敏度</label>
             <input id="touch-sens-slider" type="range" min="10" max="100" value="50">
           </div>
+          <button class="ghost-button" id="touch-layout-edit-btn" type="button">调节触控按键位置</button>
         </section>
 
         <section class="settings-group">

@@ -162,6 +162,7 @@ hud.onFovChange = () => {
 };
 camera.fov = hud.hipFov;
 camera.updateProjectionMatrix();
+crosshairScale = window.innerHeight * 0.5 / Math.tan(camera.fov * Math.PI / 360);
 audio.setVolume(hud.volume);
 
 const keys = new Set<string>();
@@ -542,17 +543,16 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 function setupTouchControls() {
-  const isTouch = matchMedia('(pointer: coarse)').matches;
-  if (isTouch) document.body.classList.add('touch-device');
-  window.addEventListener('touchstart', () => {
-    document.body.classList.add('touch-device');
+  const isTouchPointer = (e: PointerEvent) => e.pointerType === 'touch' || e.pointerType === 'pen';
+  if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch-device');
+  window.addEventListener('pointerdown', (e) => {
+    if (isTouchPointer(e)) document.body.classList.add('touch-device');
   }, { once: true, passive: true });
 
-  // Joystick
   const joystickZone = document.getElementById('touch-joystick-zone');
   const joystickBase = document.getElementById('touch-joystick-base');
   const joystickKnob = document.getElementById('touch-joystick-knob');
-  let joystickTouchId: number | null = null;
+  let joystickPointerId: number | null = null;
   let joystickCenter = { x: 0, y: 0 };
 
   const updateJoystick = (clientX: number, clientY: number) => {
@@ -566,59 +566,41 @@ function setupTouchControls() {
     const kx = Math.cos(angle) * clampedDist;
     const ky = Math.sin(angle) * clampedDist;
     if (joystickKnob) joystickKnob.style.transform = `translate(${kx.toFixed(1)}px, ${ky.toFixed(1)}px)`;
-    const nx = clampedDist > 8 ? dx / maxRadius : 0;
-    const ny = clampedDist > 8 ? dy / maxRadius : 0;
+    const nx = clampedDist > 8 ? kx / maxRadius : 0;
+    const ny = clampedDist > 8 ? ky / maxRadius : 0;
     touchForward = ny < -0.26;
     touchBack = ny > 0.26;
     touchLeft = nx < -0.26;
     touchRight = nx > 0.26;
   };
 
-  joystickZone?.addEventListener('touchstart', (e) => {
+  joystickZone?.addEventListener('pointerdown', (e) => {
+    if (!isTouchPointer(e) || joystickPointerId !== null) return;
     e.preventDefault();
     e.stopPropagation();
-    const t = e.changedTouches[0];
-    if (!t) return;
-    joystickTouchId = t.identifier;
-    if (joystickBase) {
-      const rect = joystickBase.getBoundingClientRect();
-      joystickCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    }
-    updateJoystick(t.clientX, t.clientY);
-  }, { passive: false });
-
-  window.addEventListener('touchmove', (e) => {
-    if (joystickTouchId === null) return;
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      const t = e.changedTouches[i];
-      if (t.identifier === joystickTouchId) {
-        updateJoystick(t.clientX, t.clientY);
-        break;
-      }
-    }
-  }, { passive: true });
-
-  const resetJoystick = (e: TouchEvent) => {
-    if (joystickTouchId === null) return;
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      if (e.changedTouches[i].identifier === joystickTouchId) {
-        joystickTouchId = null;
-        touchForward = touchBack = touchLeft = touchRight = false;
-        if (joystickKnob) joystickKnob.style.transform = 'translate(0px, 0px)';
-        break;
-      }
-    }
+    joystickPointerId = e.pointerId;
+    joystickZone.setPointerCapture(e.pointerId);
+    const rect = joystickBase?.getBoundingClientRect();
+    if (rect) joystickCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    updateJoystick(e.clientX, e.clientY);
+  });
+  joystickZone?.addEventListener('pointermove', (e) => {
+    if (e.pointerId === joystickPointerId) updateJoystick(e.clientX, e.clientY);
+  });
+  const resetJoystick = (e: PointerEvent) => {
+    if (e.pointerId !== joystickPointerId) return;
+    joystickPointerId = null;
+    touchForward = touchBack = touchLeft = touchRight = false;
+    if (joystickKnob) joystickKnob.style.transform = 'translate(0px, 0px)';
   };
-  window.addEventListener('touchend', resetJoystick, { passive: true });
-  window.addEventListener('touchcancel', resetJoystick, { passive: true });
+  joystickZone?.addEventListener('pointerup', resetJoystick);
+  joystickZone?.addEventListener('pointercancel', resetJoystick);
 
-  // Camera Look Touch Dragging
   let lookPointerId: number | null = null;
   let lastLookX = 0;
   let lastLookY = 0;
-
   window.addEventListener('pointerdown', (e) => {
-    if (e.pointerType !== 'touch' || !joined || !alive || hud.isSettingsOpen()) return;
+    if (!isTouchPointer(e) || !joined || !alive || hud.isSettingsOpen() || hud.isPaused()) return;
     const target = e.target as HTMLElement | null;
     if (target?.closest('button, select, input, .mc-slot, #touch-joystick-zone, #menu, .overlay, #scoreboard')) return;
     if (lookPointerId === null) {
@@ -627,7 +609,6 @@ function setupTouchControls() {
       lastLookY = e.clientY;
     }
   }, { passive: true });
-
   window.addEventListener('pointermove', (e) => {
     if (e.pointerId !== lookPointerId || !joined || !alive || hud.isSettingsOpen() || hud.isPaused()) return;
     const dx = e.clientX - lastLookX;
@@ -642,116 +623,95 @@ function setupTouchControls() {
     mouseX = Math.max(-160, Math.min(160, mouseX + dx));
     mouseY = Math.max(-160, Math.min(160, mouseY + dy));
   }, { passive: true });
-
   const stopLook = (e: PointerEvent) => {
     if (e.pointerId === lookPointerId) lookPointerId = null;
   };
   window.addEventListener('pointerup', stopLook, { passive: true });
   window.addEventListener('pointercancel', stopLook, { passive: true });
 
-  // Fire Button
+  const bindHold = (button: HTMLElement | null, start: () => boolean, stop: () => void) => {
+    let pointerId: number | null = null;
+    button?.addEventListener('pointerdown', (e) => {
+      if (!isTouchPointer(e) || pointerId !== null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!start()) return;
+      pointerId = e.pointerId;
+      button.setPointerCapture(e.pointerId);
+      button.classList.add('active');
+    });
+    const end = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      pointerId = null;
+      stop();
+      button?.classList.remove('active');
+    };
+    button?.addEventListener('pointerup', end);
+    button?.addEventListener('pointercancel', end);
+  };
+  const bindPress = (button: HTMLElement | null, action: () => void) => {
+    button?.addEventListener('pointerdown', (e) => {
+      if (!isTouchPointer(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      action();
+    });
+  };
+
   const fireBtn = document.getElementById('btn-touch-fire');
-  fireBtn?.addEventListener('pointerdown', (e) => {
-    if (e.pointerType !== 'touch') return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (!alive) return;
+  bindHold(fireBtn, () => {
+    if (!alive) return false;
     if (activeSlot === 4) {
       if (grenadePrimed) throwGrenade();
       else primeGrenade();
-      return;
+      return false;
     }
     fireHeld = true;
     firePressed = true;
-    fireBtn.setPointerCapture(e.pointerId);
-    fireBtn.classList.add('active');
-  });
-  const stopFire = (e: PointerEvent) => {
-    if (e.pointerType !== 'touch') return;
-    e.preventDefault();
-    fireHeld = false;
-    fireBtn?.classList.remove('active');
-  };
-  fireBtn?.addEventListener('pointerup', stopFire);
-  fireBtn?.addEventListener('pointercancel', stopFire);
+    return true;
+  }, () => { fireHeld = false; });
 
-  // Aim Button
   const aimBtn = document.getElementById('btn-touch-aim');
-  aimBtn?.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!alive || weapons.weaponId === 6) return;
-    if (isSniper(weapons.weaponId) && awpRescopeAt) return;
-    if (aiming) {
-      stopAiming();
-      aimBtn.classList.remove('active');
-    } else {
+  bindPress(aimBtn, () => {
+    if (!alive || weapons.weaponId === 6 || isSniper(weapons.weaponId) && awpRescopeAt) return;
+    if (aiming) stopAiming();
+    else {
       aimStartedAt = performance.now();
       aiming = true;
-      aimBtn.classList.add('active');
+      aimBtn?.classList.add('active');
     }
-  }, { passive: false });
+  });
 
-  // Jump Button
   const jumpBtn = document.getElementById('btn-touch-jump');
-  jumpBtn?.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  bindHold(jumpBtn, () => {
+    if (!alive) return false;
     touchJump = true;
-    jumpBtn.classList.add('active');
-  }, { passive: false });
-  const stopJump = (e: TouchEvent) => {
-    e.preventDefault();
-    touchJump = false;
-    jumpBtn?.classList.remove('active');
-  };
-  jumpBtn?.addEventListener('touchend', stopJump, { passive: false });
-  jumpBtn?.addEventListener('touchcancel', stopJump, { passive: false });
+    return true;
+  }, () => { touchJump = false; });
 
-  // Crouch Button
   const crouchBtn = document.getElementById('btn-touch-crouch');
-  crouchBtn?.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  bindPress(crouchBtn, () => {
+    if (!alive) return;
     touchCrouch = !touchCrouch;
-    crouchBtn.classList.toggle('active', touchCrouch);
-  }, { passive: false });
-
-  // Reload Button
-  const reloadBtn = document.getElementById('btn-touch-reload');
-  reloadBtn?.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    startReload();
-  }, { passive: false });
-
-  // Grenade Button
-  const nadeBtn = document.getElementById('btn-touch-nade');
-  nadeBtn?.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+    crouchBtn?.classList.toggle('active', touchCrouch);
+  });
+  bindPress(document.getElementById('btn-touch-reload'), () => startReload());
+  bindPress(document.getElementById('btn-touch-nade'), () => {
+    if (!alive) return;
     if (activeSlot !== 4) {
       selectSlot(4);
       primeGrenade();
-    } else if (grenadePrimed) {
-      throwGrenade();
-    } else {
-      primeGrenade();
-    }
-  }, { passive: false });
+    } else if (grenadePrimed) throwGrenade();
+    else primeGrenade();
+  });
 
-  // Pause Button
-  const pauseBtn = document.getElementById('btn-touch-pause');
-  pauseBtn?.addEventListener('click', (e) => {
+  document.getElementById('btn-touch-pause')?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     clearCombatInput();
     hud.showPause(true);
   });
-
-  // Scoreboard Button
-  const scoreBtn = document.getElementById('btn-touch-score');
-  scoreBtn?.addEventListener('click', (e) => {
+  document.getElementById('btn-touch-score')?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     const sb = document.getElementById('scoreboard');
@@ -762,16 +722,97 @@ function setupTouchControls() {
       net.requestRoster();
     }
   });
-
-  // Hotbar Slots tap
   for (let i = 1; i <= 4; i++) {
-    const slotEl = document.getElementById(`slot-${i}`);
-    slotEl?.addEventListener('pointerdown', (e) => {
+    document.getElementById(`slot-${i}`)?.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       selectSlot(i);
     });
   }
+
+  const movableIds = ['touch-top-bar', 'touch-joystick-zone', 'btn-touch-fire', 'btn-touch-jump', 'btn-touch-crouch', 'btn-touch-aim', 'btn-touch-reload', 'btn-touch-nade'];
+  const offsets: Record<string, [number, number]> = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem('ps_touch_layout') ?? '{}') as Record<string, unknown>;
+    for (const id of movableIds) {
+      const pair = saved[id];
+      if (Array.isArray(pair) && pair.length === 2 && pair.every(Number.isFinite)) offsets[id] = [Number(pair[0]), Number(pair[1])];
+    }
+  } catch {}
+  const applyTouchLayout = () => {
+    for (const id of movableIds) {
+      const element = document.getElementById(id);
+      const offset = offsets[id];
+      if (element) element.style.setProperty('translate', offset ? `${offset[0] * innerWidth}px ${offset[1] * innerHeight}px` : '');
+    }
+  };
+  applyTouchLayout();
+  window.addEventListener('resize', applyTouchLayout);
+
+  let editingLayout = false;
+  for (const id of movableIds) {
+    const element = document.getElementById(id);
+    let pointerId: number | null = null;
+    let startX = 0;
+    let startY = 0;
+    let startOffset: [number, number] = [0, 0];
+    let startRect: DOMRect | null = null;
+    element?.addEventListener('pointerdown', (e) => {
+      if (!editingLayout || !isTouchPointer(e)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      pointerId = e.pointerId;
+      startX = e.clientX;
+      startY = e.clientY;
+      startOffset = offsets[id] ?? [0, 0];
+      startRect = element.getBoundingClientRect();
+      element.setPointerCapture(e.pointerId);
+    }, { capture: true });
+    element?.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== pointerId || !startRect) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const dx = Math.max(-startRect.left, Math.min(innerWidth - startRect.right, e.clientX - startX));
+      const dy = Math.max(-startRect.top, Math.min(innerHeight - startRect.bottom, e.clientY - startY));
+      offsets[id] = [startOffset[0] + dx / innerWidth, startOffset[1] + dy / innerHeight];
+      applyTouchLayout();
+    }, { capture: true });
+    const finishDrag = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      pointerId = null;
+      localStorage.setItem('ps_touch_layout', JSON.stringify(offsets));
+    };
+    element?.addEventListener('pointerup', finishDrag, { capture: true });
+    element?.addEventListener('pointercancel', finishDrag, { capture: true });
+  }
+  window.addEventListener('click', (e) => {
+    if (editingLayout && (e.target as Element | null)?.closest('#touch-controls') && !(e.target as Element | null)?.closest('#touch-layout-toolbar')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }, { capture: true });
+  const finishLayoutEdit = () => {
+    editingLayout = false;
+    document.body.classList.remove('touch-layout-edit');
+    hud.root.style.display = joined ? 'block' : 'none';
+    hud.toggleSettings(true);
+  };
+  document.getElementById('touch-layout-reset')?.addEventListener('click', () => {
+    for (const id of movableIds) delete offsets[id];
+    localStorage.removeItem('ps_touch_layout');
+    applyTouchLayout();
+  });
+  document.getElementById('touch-layout-save')?.addEventListener('click', finishLayoutEdit);
+  hud.onTouchLayoutEdit = () => {
+    clearCombatInput();
+    editingLayout = true;
+    hud.toggleSettings(false);
+    hud.showPause(false);
+    hud.root.style.display = 'block';
+    document.body.classList.add('touch-device', 'touch-layout-edit');
+  };
 }
 setupTouchControls();
 
@@ -1597,10 +1638,14 @@ function weaponSpread(def: WeaponDef, vx: number, vz: number, onGround: boolean,
     else if (isPistol(def.id)) floor = 0.22;
   }
   const base = Math.max(def.spread, floor);
-  const moveFactor = Math.min(1, Math.hypot(vx, vz) / 3);
+  const speed = Math.hypot(vx, vz);
+  const moveFactor = Math.max(0, Math.min(1, (speed - 0.35) / (3.5 - 0.35)));
   let spread = base + (def.moveSpread - base) * moveFactor;
-  spread += Math.min(0.28, burstShots * def.bloom * 0.14);
-  if (crouching) spread *= 0.68;
+  spread += Math.min(def.bloom * 1.6, burstShots * def.bloom * 0.18);
+  if (crouching) {
+    if (onGround && !landing && speed <= 0.35 && burstShots === 0 && !isShotgun(def.id)) return 0;
+    spread *= 0.68;
+  }
   if (ads && !isSniper(def.id)) spread *= isShotgun(def.id) ? 0.85 : 0.62;
   if (!onGround) spread = Math.max(spread, def.moveSpread * 1.55 + 0.45);
   if (landing) spread = Math.max(spread, def.moveSpread * 1.12);
@@ -1626,6 +1671,7 @@ function applyRecoil(weapon: number, shot: number, ads: boolean) {
   const i = Math.max(0, shot - 1);
   let scale = ads ? 0.45 : 1;
   if (performance.now() < recoilBoostUntil) scale *= 0.50;
+  if (local.crouch) scale *= 0.78;
   let pitch = 0;
   let yaw = 0;
   switch (weapon) {

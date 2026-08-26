@@ -532,9 +532,17 @@ func TestEveryGunRewardsCrouchingAndPenalizesMovement(t *testing.T) {
 		aiming := isSniper(def.Id)
 		crouched := weaponSpread(def, 0, 0, true, true, false, aiming, 0)
 		standing := weaponSpread(def, 0, 0, true, false, false, aiming, 0)
-		moving := weaponSpread(def, 3, 0, true, false, false, aiming, 0)
-		if !(crouched < standing && standing < moving) {
-			t.Fatalf("%s spread crouched=%v standing=%v moving=%v", def.Name, crouched, standing, moving)
+		nearStopped := weaponSpread(def, .35, 0, true, false, false, aiming, 0)
+		moving := weaponSpread(def, 3.5, 0, true, false, false, aiming, 0)
+		if isShotgun(def.Id) {
+			if !(crouched < standing) {
+				t.Fatalf("%s crouched spread=%v standing=%v", def.Name, crouched, standing)
+			}
+		} else if crouched != 0 {
+			t.Fatalf("%s stationary crouched first shot is not exact: %v", def.Name, crouched)
+		}
+		if nearStopped != standing || standing >= moving {
+			t.Fatalf("%s spread stopped=%v standing=%v moving=%v", def.Name, nearStopped, standing, moving)
 		}
 	}
 }

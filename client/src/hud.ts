@@ -89,6 +89,7 @@ export class Hud {
   onFlightToggle: (() => void) | null = null;
   onExit: (() => void) | null = null;
   onSettingsClose: (() => void) | null = null;
+  onTouchLayoutEdit: (() => void) | null = null;
   private menu = el('menu');
   private scoreboard = el('scoreboard');
   private settings = el('settings-modal');
@@ -121,6 +122,7 @@ export class Hud {
   private lastScope: boolean | null = null;
   private lastCrosshair = -1;
   private lastDynamic = true;
+  private lastCrosshairSpread = 0;
   private lastDeathCountdown = -2;
   private lastReloading: boolean | null = null;
   private lastReloadPct = -1;
@@ -482,6 +484,11 @@ export class Hud {
     el('pause-resume-btn')?.addEventListener('click', () => this.showPause(false));
     el('pause-flight-btn')?.addEventListener('click', () => this.onFlightToggle?.());
     el('pause-exit-btn')?.addEventListener('click', () => this.onExit?.());
+    el('pause-settings-btn')?.addEventListener('click', () => {
+      this.showPause(false);
+      this.toggleSettings(true);
+    });
+    el('touch-layout-edit-btn')?.addEventListener('click', () => this.onTouchLayoutEdit?.());
   }
 
   applyCrosshair() {
@@ -494,7 +501,8 @@ export class Hud {
     this.crosshair.style.setProperty('--ch-size', `${this.crosshairSize}px`);
     this.crosshair.style.setProperty('--ch-thickness', `${this.crosshairThickness}px`);
     this.crosshair.style.setProperty('--ch-dot', `${this.crosshairThickness}px`);
-    this.setCrosshair(this.lastCrosshair);
+    this.lastCrosshair = -1;
+    this.setCrosshair(this.lastCrosshairSpread);
   }
 
   updateCrosshairPreview() {
@@ -825,14 +833,16 @@ export class Hud {
   }
 
   setCrosshair(spread: number) {
+    this.lastCrosshairSpread = spread;
     const dynamic = this.crosshairDynamic;
     const gap = this.crosshairGap;
-    const px = dynamic ? Math.max(gap, Math.min(32, Math.round(spread))) : gap;
+    const px = dynamic ? Math.round((gap + Math.max(0, Math.min(32 - gap, spread))) * 10) / 10 : gap;
     if (px === this.lastCrosshair && dynamic === this.lastDynamic) return;
     this.lastCrosshair = px;
     this.lastDynamic = dynamic;
     this.crosshair.style.setProperty('--spread', `${px}px`);
-    this.crosshair.dataset.accuracy = dynamic ? (px < 7 ? 'tight' : px < 14 ? 'warm' : 'wide') : 'fixed';
+    const cone = dynamic ? px - gap : 0;
+    this.crosshair.dataset.accuracy = dynamic ? (cone < 4 ? 'tight' : cone < 11 ? 'warm' : 'wide') : 'fixed';
   }
 
 
