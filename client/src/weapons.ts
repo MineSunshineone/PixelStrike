@@ -321,7 +321,7 @@ export class Weapons {
   onFired(t: number, intervalOverride?: number) {
     const def = WEAPONS[this.weaponId] ?? WEAPONS[0];
     const interval = intervalOverride ?? 60000 / def.rpm;
-    this.nextFireAt = this.nextFireAt > 0 && t - this.nextFireAt < interval ? this.nextFireAt + interval : t + interval;
+    this.nextFireAt = this.weaponId === 6 ? t + interval : this.nextFireAt > 0 && t - this.nextFireAt < interval ? this.nextFireAt + interval : t + interval;
     if (isSniper(this.weaponId)) {
       this.boltCycleStartedAt = t;
       this.boltCycleUntil = this.nextFireAt;

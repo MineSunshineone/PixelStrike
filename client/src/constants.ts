@@ -10,6 +10,8 @@ export const OP = {
   Loadout: 0x09,
   RosterRequest: 0x0a,
   ToggleFlight: 0x0b,
+  Ultimate: 0x0c,
+  Chat: 0x0d,
   Welcome: 0x81,
   Snapshot: 0x82,
   Events: 0x83,
@@ -53,6 +55,7 @@ export interface PlayerSnap {
   shot: number;
   skin: number;
   weaponSkin: number;
+  ultimate: number;
 }
 
 export interface RosterEntry {
@@ -113,6 +116,13 @@ export const XM_PELLETS: readonly [number, number][] = [
   [-0.08, -1.00],
   [0.78, -0.62],
 ];
+
+export const ULTIMATE_REQUIREMENT = 7;
+export const ULTIMATES = [
+  { id: 1, key: 'Z', name: '黑梦', durationMs: 10000, description: '真人视线变黑，bot 停火 10 秒' },
+  { id: 2, key: 'X', name: '无敌', durationMs: 15000, description: '不受任何伤害 15 秒' },
+  { id: 3, key: 'V', name: '幽灵', durationMs: 10000, description: '隐身并提速 10 秒，弹道仍会暴露位置' },
+] as const;
 export const scopeSettleMs = (id: number) => id === 5 ? 320 : id === 11 ? 240 : 0;
 
 export const KEY = {

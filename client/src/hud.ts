@@ -1,4 +1,4 @@
-import { WEAPONS, type MapData, type PlayerSnap, type RosterEntry } from './constants.js';
+import { ULTIMATE_REQUIREMENT, ULTIMATES, WEAPONS, type MapData, type PlayerSnap, type RosterEntry } from './constants.js';
 import { CharacterPreview } from './preview.js';
 
 function el(id: string): HTMLElement {
@@ -90,12 +90,15 @@ export class Hud {
   onExit: (() => void) | null = null;
   onSettingsClose: (() => void) | null = null;
   onTouchLayoutEdit: (() => void) | null = null;
+  onChatSubmit: ((text: string) => void) | null = null;
   private menu = el('menu');
   private scoreboard = el('scoreboard');
   private settings = el('settings-modal');
   private pause = el('pause-overlay');
   private disconnect = el('disconnect-overlay');
   private killfeed = el('killfeed');
+  private chatLog = el('chat-log');
+  chatInput = el('chat-input') as HTMLInputElement;
   private hit = el('hitmarker');
   private streak = el('kill-streak');
   private killMedal = el('kill-medal');
@@ -130,8 +133,11 @@ export class Hud {
   private hurtTimer = 0;
   private toastTimer = 0;
   private announcementTimer = 0;
+  private ultimateTimer = 0; private pointTimer = 0;
   private reconnectTimer = 0;
   private refreshWeaponProgress: (() => void) | null = null;
+  ultimateSelectorOpen = false;
+  private chatHideTimer = 0;
 
   constructor() {
     const primary = el('primary-select') as HTMLSelectElement;
@@ -312,6 +318,63 @@ export class Hud {
     this.loadLeaderboard();
   }
 
+  setUltimate(points: number, kind: number) {
+    const panel = el('ultimate-panel');
+    if (!panel) return;
+    panel.classList.toggle('ready', points >= ULTIMATE_REQUIREMENT);
+    panel.classList.toggle('active', kind !== 0);
+    el('ultimate-points').textContent = kind ? '' : `${points}/${ULTIMATE_REQUIREMENT}`;
+    el('ultimate-name').textContent = kind ? (ULTIMATES.find((u) => u.id === kind)?.name ?? '') : 'ULT';
+    const fill = el('ultimate-fill');
+    if (fill) fill.style.width = `${Math.min(100, points / ULTIMATE_REQUIREMENT * 100)}%`;
+  }
+
+  setBlackDream(active: boolean) {
+    const overlay = el('black-dream');
+    if (overlay) overlay.style.display = active ? 'block' : 'none';
+  }
+
+  toggleUltimateSelector(force?: boolean) {
+    const selector = el('ultimate-selector');
+    if (!selector) return;
+    this.ultimateSelectorOpen = force ?? !this.ultimateSelectorOpen;
+    selector.style.display = this.ultimateSelectorOpen ? 'flex' : 'none';
+  }
+
+  showKillPoint(points: number) {
+    const banner = el('kill-point-banner');
+    if (!banner) return;
+    banner.textContent = `⚡ 终极点数 ${points}/${ULTIMATE_REQUIREMENT}`;
+    banner.classList.remove('show');
+    void banner.offsetWidth;
+    banner.classList.add('show');
+    clearTimeout(this.pointTimer);
+    this.pointTimer = window.setTimeout(() => banner.classList.remove('show'), 2000);
+  }
+
+  showUltimateReady() {
+    const selector = el('ultimate-selector');
+    if (selector) selector.style.display = 'flex';
+  }
+
+  showUltimateAnnouncement(kind: number, playerName?: string) {
+    const ult = ULTIMATES.find((u) => u.id === kind);
+    if (!ult) return;
+    const banner = el('ultimate-announcement');
+    if (playerName) {
+      banner.textContent = `${playerName} 开启了 ${ult.name}`;
+    } else {
+      banner.textContent = ult.name;
+    }
+    banner.dataset.kind = String(kind);
+    banner.classList.remove('show');
+    void banner.offsetWidth;
+    banner.classList.add('show');
+    clearTimeout(this.ultimateTimer);
+    this.ultimateTimer = window.setTimeout(() => banner.classList.remove('show'), 2000);
+  }
+
+
   private setupSettings() {
     const sens = el('sens-slider') as HTMLInputElement;
     const adsSens = el('ads-sens-slider') as HTMLInputElement;
@@ -489,6 +552,31 @@ export class Hud {
       this.toggleSettings(true);
     });
     el('touch-layout-edit-btn')?.addEventListener('click', () => this.onTouchLayoutEdit?.());
+
+    this.chatInput?.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.code === 'Escape') {
+        event.preventDefault();
+        this.setChatInputOpen(false);
+        this.chatInput.blur();
+        return;
+      }
+      if (event.code !== 'Enter' || event.shiftKey) return;
+      event.preventDefault();
+      const text = this.chatInput.value.trim().slice(0, 120);
+      this.chatInput.value = '';
+      if (!text) {
+        this.setChatInputOpen(false);
+        this.chatInput.blur();
+        return;
+      }
+      this.onChatSubmit?.(text);
+      this.setChatInputOpen(false);
+      this.chatInput.blur();
+    });
+    this.chatInput?.addEventListener('input', () => {
+      this.chatInput.value = this.chatInput.value.slice(0, 120);
+    });
   }
 
   applyCrosshair() {
@@ -1077,5 +1165,38 @@ export class Hud {
       const lbEl = el('leaderboard');
       if (lbEl) lbEl.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f43f5e;padding:16px;">排行榜暂不可用</td></tr>';
     }
+  }
+
+  addChatMessage(name: string, message: string, mine: boolean) {
+    if (!this.chatLog) return;
+    const row = document.createElement('div');
+    row.className = 'chat-row' + (mine ? ' mine' : '');
+    const sender = document.createElement('span');
+    sender.className = 'chat-name';
+    sender.textContent = name || '特战队员';
+    const body = document.createElement('span');
+    body.className = 'chat-text';
+    body.textContent = message;
+    row.append(sender, body);
+    this.chatLog.prepend(row);
+    while (this.chatLog.children.length > 8) this.chatLog.lastElementChild?.remove();
+    this.showChatLog();
+  }
+
+  showChatLog() {
+    if (!this.chatLog) return;
+    this.chatLog.classList.add('active');
+    clearTimeout(this.chatHideTimer);
+    this.chatHideTimer = window.setTimeout(() => this.chatLog.classList.remove('active'), 6500);
+  }
+
+  setChatInputOpen(open: boolean) {
+    const panel = el('chat-panel');
+    panel?.classList.toggle('composing', open);
+    if (open) this.showChatLog();
+  }
+
+  isChatComposing(): boolean {
+    return document.activeElement === this.chatInput;
   }
 }

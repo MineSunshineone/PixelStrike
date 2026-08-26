@@ -19,6 +19,8 @@ const (
 	OpLoadout       = 0x09
 	OpRosterRequest = 0x0A
 	OpToggleFlight  = 0x0B
+	OpUltimate      = 0x0C
+	OpChat          = 0x0D
 
 	OpWelcome     = 0x81
 	OpSnapshot    = 0x82
@@ -48,6 +50,8 @@ const (
 	EvStreakBuff
 	EvRevenge
 	EvBondEvent
+	EvUltimate
+	EvChat
 )
 
 type Event struct {
@@ -57,6 +61,7 @@ type Event struct {
 	Origin, Dir                 Vec3
 	Ms                          uint16
 	Name                        string
+	Message                     string
 }
 
 type Buf struct{ b []byte }
@@ -100,8 +105,8 @@ func Maintenance(retryAfter uint8) []byte {
 }
 
 type compactSelfState struct {
-	slot, weapon, weaponSkin, mag, nades uint8
-	reserve                              uint16
+	slot, weapon, weaponSkin, mag, nades, ultimatePoints, ultimate uint8
+	reserve                                                        uint16
 }
 
 func compactSelf(p *PlayerState) compactSelfState {
@@ -109,7 +114,7 @@ func compactSelf(p *PlayerState) compactSelfState {
 	return compactSelfState{
 		slot: p.ActiveSlot, weapon: p.Weapon, weaponSkin: p.WeaponSkin,
 		mag: uint8(max(0, min(mag, 255))), reserve: uint16(max(0, min(reserve, 65535))),
-		nades: uint8(max(0, min(p.Grenades, 255))),
+		nades: uint8(max(0, min(p.Grenades, 255))), ultimatePoints: p.UltimatePoints, ultimate: p.Ultimate,
 	}
 }
 
@@ -123,6 +128,8 @@ func SelfState(p *PlayerState) []byte {
 	w.U8(state.mag)
 	w.U16(state.reserve)
 	w.U8(state.nades)
+	w.U8(state.ultimatePoints)
+	w.U8(state.ultimate)
 	return w.Bytes()
 }
 
@@ -207,6 +214,21 @@ func Events(evts []Event) []byte {
 			nb := safeNameBytes(e.Name)
 			w.U8(uint8(len(nb)))
 			w.b = append(w.b, nb...)
+		case EvUltimate:
+			w.U16(e.Player)
+			w.U8(e.Kind)
+			w.U16(e.Ms)
+			nb := safeNameBytes(e.Name)
+			w.U8(uint8(len(nb)))
+			w.b = append(w.b, nb...)
+		case EvChat:
+			w.U16(e.Player)
+			nb := safeNameBytes(e.Name)
+			w.U8(uint8(len(nb)))
+			w.b = append(w.b, nb...)
+			mb := safeChatBytes(e.Message)
+			w.U8(uint8(len(mb)))
+			w.b = append(w.b, mb...)
 		}
 	}
 	return w.Bytes()
@@ -215,6 +237,14 @@ func Events(evts []Event) []byte {
 func safeNameBytes(name string) []byte {
 	b := []byte(name)
 	for len(b) > 64 || !utf8.Valid(b) {
+		b = b[:len(b)-1]
+	}
+	return b
+}
+
+func safeChatBytes(text string) []byte {
+	b := []byte(text)
+	for len(b) > maxChatBytes || !utf8.Valid(b) {
 		b = b[:len(b)-1]
 	}
 	return b

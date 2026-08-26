@@ -143,6 +143,15 @@ func (r *Room) StepBots(now time.Time) {
 
 		p := &pl.PlayerState
 
+		// 黑梦期间所有 bot 完全冻结：不动、不开火、不换弹、不切枪、不扔雷、不转身。
+		if r.AnyBlackDream(now) {
+			p.CmdKeys = 0
+			ai.Target = nil
+			ai.TargetDist = 0
+			ai.HearUntil = time.Time{}
+			continue
+		}
+
 		mag, _ := p.ActiveAmmo()
 		if mag <= 0 && p.ActiveSlot == 1 && p.Mags[1] > 0 {
 			p.SwitchSlot(2)
@@ -181,7 +190,7 @@ func (r *Room) StepBots(now time.Time) {
 		}
 		if (r.tick+uint32(p.Id))%7 == 0 {
 			for _, other := range r.Players {
-				if other.Id == p.Id || !other.Alive || other.ProtectedAt(now) || other.Crouch {
+				if other.Id == p.Id || !other.Alive || other.ProtectedAt(now) || other.Crouch || other.GhostAt(now) {
 					continue
 				}
 				speed := math.Hypot(other.Vel.X, other.Vel.Z)
@@ -204,7 +213,7 @@ func (r *Room) StepBots(now time.Time) {
 			huntingRevenge := ai.RevengeID != 0 && now.Before(ai.RevengeUntil)
 			for i := range r.Players {
 				other := &r.Players[i].PlayerState
-				if other.Id == p.Id || !other.Alive || other.ProtectedAt(now) {
+				if other.Id == p.Id || !other.Alive || other.ProtectedAt(now) || other.GhostAt(now) {
 					continue
 				}
 				dx := other.Pos.X - p.Pos.X
@@ -361,8 +370,8 @@ func (r *Room) StepBots(now time.Time) {
 				ai.NextNadeAt = now.Add(time.Duration(9+rand.IntN(8)) * time.Second)
 			}
 
-			// Fire weapon
-			if !p.Reloading && mag > 0 && now.After(ai.FireCooldown) && math.Abs(yawDiff) < 0.20-0.03*float64(skill) {
+			// Fire weapon (bots stop shooting during Black Dream)
+			if !r.AnyBlackDream(now) && !p.Reloading && mag > 0 && now.After(ai.FireCooldown) && math.Abs(yawDiff) < 0.20-0.03*float64(skill) {
 				jitter := 0.11 - 0.022*float64(skill)
 				aimYaw := p.Yaw + (rand.Float64()-0.5)*jitter
 				aimPitch := p.Pitch + (rand.Float64()-0.5)*jitter*0.7

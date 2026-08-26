@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 )
@@ -323,6 +324,29 @@ func (p *Player) readPump(hub *Hub) {
 				}
 				room.mu.Unlock()
 			}
+		case OpUltimate:
+			if len(payload) < 1 {
+				continue
+			}
+			if room := p.Room; room != nil {
+				room.mu.Lock()
+				room.CastUltimate(&p.PlayerState, payload[0], now)
+				room.mu.Unlock()
+			}
+		case OpChat:
+			if !p.joined || len(payload) < 1 {
+				continue
+			}
+			text := sanitizeChat(string(payload))
+			if text == "" || now.Before(p.NextChatAt) {
+				continue
+			}
+			p.NextChatAt = now.Add(chatCooldown)
+			if room := p.Room; room != nil {
+				room.mu.Lock()
+				room.Emit(Event{Type: EvChat, Player: p.Id, Name: p.Name, Message: text})
+				room.mu.Unlock()
+			}
 		case OpPing:
 			out := make([]byte, 5)
 			out[0] = OpPong
@@ -469,6 +493,26 @@ func sanitizeName(s string) string {
 		if c != '\n' && c != '\r' && c != '\t' && c != 0 && c != '<' && c != '>' && c != '"' && c != '\'' {
 			out = append(out, c)
 		}
+	}
+	return string(out)
+}
+
+func sanitizeChat(s string) string {
+	s = strings.ToValidUTF8(s, "")
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) > maxChatRunes {
+		r = r[:maxChatRunes]
+	}
+	out := r[:0]
+	for _, c := range r {
+		if c == 0 || c == '\n' || c == '\r' || c == '\t' || (c < 0x20 && c != ' ') {
+			continue
+		}
+		if utf8.RuneLen(c) < 0 {
+			continue
+		}
+		out = append(out, c)
 	}
 	return string(out)
 }

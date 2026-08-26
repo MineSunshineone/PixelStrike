@@ -1,7 +1,7 @@
 import { OP, PROTOCOL_VERSION, type PlayerSnap, type RosterEntry } from './constants.js';
 
-export interface GameEvent { type:number; killer?:number; victim?:number; player?:number; weapon?:number; headshot?:number; origin?:[number,number,number]; dir?:[number,number,number]; name?:string; pickup?:number; kind?:number; ms?:number; streak?:number }
-export interface SelfState { ack:number; slot:number; weapon:number; weaponSkin:number; mag:number; reserve:number; nades:number }
+export interface GameEvent { type:number; killer?:number; victim?:number; player?:number; weapon?:number; headshot?:number; origin?:[number,number,number]; dir?:[number,number,number]; name?:string; pickup?:number; kind?:number; ms?:number; streak?:number; message?:string }
+export interface SelfState { ack:number; slot:number; weapon:number; weaponSkin:number; mag:number; reserve:number; nades:number; ultimatePoints:number; ultimate:number }
 
 export class Net {
   ws!:WebSocket; yourId=0; connected=false; lastServerTick=0;
@@ -68,14 +68,14 @@ export class Net {
     if (op === OP.Reject) { const n=v.getUint8(1),reason=new TextDecoder().decode(new Uint8Array(v.buffer,v.byteOffset+2,n));this.closedByUser=true;this.onReject?.(reason);this.ws.close();return; }
     if (op === OP.Snapshot) { this.decodeSnapshot(v); return; }
     if (op === OP.Events) { this.decodeEvents(v); return; }
-    if (op === OP.Self) { this.onSelf?.({ack:v.getUint16(1,true),slot:v.getUint8(3),weapon:v.getUint8(4),weaponSkin:v.getUint8(5),mag:v.getUint8(6),reserve:v.getUint16(7,true),nades:v.getUint8(9)}); return; }
+    if (op === OP.Self) { this.onSelf?.({ack:v.getUint16(1,true),slot:v.getUint8(3),weapon:v.getUint8(4),weaponSkin:v.getUint8(5),mag:v.getUint8(6),reserve:v.getUint16(7,true),nades:v.getUint8(9),ultimatePoints:v.getUint8(10),ultimate:v.getUint8(11)}); return; }
     if (op === OP.Roster) {
       let o=2; const rows:RosterEntry[]=[];
       for(let i=0,n=v.getUint8(1);i<n;i++){const id=v.getUint16(o,true),kills=v.getUint16(o+2,true),deaths=v.getUint16(o+4,true),len=v.getUint8(o+6);o+=7;const name=new TextDecoder().decode(new Uint8Array(v.buffer,v.byteOffset+o,len));o+=len;rows.push({id,name,kills,deaths})}
       this.onRoster?.(rows);
     }
   }
-  private decodeSnapshot(v:DataView){const tick=v.getUint32(1,true),ack=v.getUint16(5,true),n=v.getUint8(7);this.lastServerTick=tick;let o=8;const updated:PlayerSnap[]=[];for(let i=0;i<n;i++){const id=v.getUint16(o,true),mask=v.getUint16(o+2,true);o+=4;let s=this.states.get(id);if(mask===0x8000){s={id,x:v.getInt16(o,true)/100,y:v.getInt16(o+2,true)/100,z:v.getInt16(o+4,true)/100,yaw:half(v.getInt16(o+6,true)),pitch:half(v.getInt16(o+8,true)),vx:v.getInt8(o+10)/10,vz:v.getInt8(o+11)/10,hp:v.getUint8(o+12),armor:v.getUint8(o+13),state:v.getUint8(o+14),weapon:v.getUint8(o+15),shot:v.getUint8(o+16),skin:v.getUint8(o+17),weaponSkin:v.getUint8(o+18)};o+=19}else{if(!s){if(mask&1)o+=3;else if(mask&2)o+=6;if(mask&4)o+=2;else if(mask&8)o+=4;if(mask&16)o+=2;if(mask&32)o+=2;if(mask&64)o+=1;if(mask&128)o+=1;if(mask&256)o+=1;if(mask&512)o+=1;if(mask&1024)o+=1;continue}if(mask&1){s.x+=v.getInt8(o++)/100;s.y+=v.getInt8(o++)/100;s.z+=v.getInt8(o++)/100}else if(mask&2){s.x=v.getInt16(o,true)/100;s.y=v.getInt16(o+2,true)/100;s.z=v.getInt16(o+4,true)/100;o+=6}if(mask&4){s.yaw=wrap(s.yaw+half(v.getInt8(o++)));s.pitch+=half(v.getInt8(o++))}else if(mask&8){s.yaw=half(v.getInt16(o,true));s.pitch=half(v.getInt16(o+2,true));o+=4}if(mask&16){s.vx=v.getInt8(o++)/10;s.vz=v.getInt8(o++)/10}if(mask&32){s.hp=v.getUint8(o++);s.armor=v.getUint8(o++)}if(mask&64)s.state=v.getUint8(o++);if(mask&128)s.weapon=v.getUint8(o++);if(mask&256)s.shot=v.getUint8(o++);if(mask&512)s.skin=v.getUint8(o++);if(mask&1024)s.weaponSkin=v.getUint8(o++)}this.states.set(id,s);updated.push(s)}this.onSnapshot(tick,ack,updated)}
+  private decodeSnapshot(v:DataView){const tick=v.getUint32(1,true),ack=v.getUint16(5,true),n=v.getUint8(7);this.lastServerTick=tick;let o=8;const updated:PlayerSnap[]=[];for(let i=0;i<n;i++){const id=v.getUint16(o,true),mask=v.getUint16(o+2,true);o+=4;let s=this.states.get(id);if(mask===0x8000){s={id,x:v.getInt16(o,true)/100,y:v.getInt16(o+2,true)/100,z:v.getInt16(o+4,true)/100,yaw:half(v.getInt16(o+6,true)),pitch:half(v.getInt16(o+8,true)),vx:v.getInt8(o+10)/10,vz:v.getInt8(o+11)/10,hp:v.getUint8(o+12),armor:v.getUint8(o+13),state:v.getUint8(o+14),weapon:v.getUint8(o+15),shot:v.getUint8(o+16),skin:v.getUint8(o+17),weaponSkin:v.getUint8(o+18),ultimate:v.getUint8(o+19)};o+=20}else{if(!s){if(mask&1)o+=3;else if(mask&2)o+=6;if(mask&4)o+=2;else if(mask&8)o+=4;if(mask&16)o+=2;if(mask&32)o+=2;if(mask&64)o+=1;if(mask&128)o+=1;if(mask&256)o+=1;if(mask&512)o+=1;if(mask&1024)o+=1;if(mask&2048)o+=1;continue}if(mask&1){s.x+=v.getInt8(o++)/100;s.y+=v.getInt8(o++)/100;s.z+=v.getInt8(o++)/100}else if(mask&2){s.x=v.getInt16(o,true)/100;s.y=v.getInt16(o+2,true)/100;s.z=v.getInt16(o+4,true)/100;o+=6}if(mask&4){s.yaw=wrap(s.yaw+half(v.getInt8(o++)));s.pitch+=half(v.getInt8(o++))}else if(mask&8){s.yaw=half(v.getInt16(o,true));s.pitch=half(v.getInt16(o+2,true));o+=4}if(mask&16){s.vx=v.getInt8(o++)/10;s.vz=v.getInt8(o++)/10}if(mask&32){s.hp=v.getUint8(o++);s.armor=v.getUint8(o++)}if(mask&64)s.state=v.getUint8(o++);if(mask&128)s.weapon=v.getUint8(o++);if(mask&256)s.shot=v.getUint8(o++);if(mask&512)s.skin=v.getUint8(o++);if(mask&1024)s.weaponSkin=v.getUint8(o++);if(mask&2048)s.ultimate=v.getUint8(o++)}this.states.set(id,s);updated.push(s)}this.onSnapshot(tick,ack,updated)}
   private decodeEvents(v: DataView) {
     const rows: GameEvent[] = [];
     let o = 2;
@@ -133,6 +133,20 @@ export class Net {
           e.name = new TextDecoder().decode(new Uint8Array(v.buffer, v.byteOffset + o + 7, len));
           o += 7 + len; break;
         }
+        case 16: {
+          e.player = v.getUint16(o, true); e.kind = v.getUint8(o + 2); e.ms = v.getUint16(o + 3, true);
+          const len = v.getUint8(o + 5);
+          e.name = new TextDecoder().decode(new Uint8Array(v.buffer, v.byteOffset + o + 6, len));
+          o += 6 + len; break;
+        }
+        case 17: {
+          e.player = v.getUint16(o, true);
+          const nameLen = v.getUint8(o + 2);
+          e.name = new TextDecoder().decode(new Uint8Array(v.buffer, v.byteOffset + o + 3, nameLen));
+          const messageLen = v.getUint8(o + 3 + nameLen);
+          e.message = new TextDecoder().decode(new Uint8Array(v.buffer, v.byteOffset + o + 4 + nameLen, messageLen));
+          o += 4 + nameLen + messageLen; break;
+        }
       }
       rows.push(e);
     }
@@ -140,7 +154,7 @@ export class Net {
   }
   sendInput(seq:number,keys:number,yaw:number,pitch:number){const b=this.input,v=this.inputView;b[0]=OP.Input;v.setUint16(1,seq,true);b[3]=keys;v.setFloat32(4,yaw,true);v.setFloat32(8,pitch,true);this.raw(b)}
   sendFire(seq:number,tick:number,mode:number,yaw:number,pitch:number){const b=new Uint8Array(16),v=new DataView(b.buffer);b[0]=OP.Fire;v.setUint16(1,seq,true);v.setUint32(3,tick,true);b[7]=mode;v.setFloat32(8,yaw,true);v.setFloat32(12,pitch,true);this.raw(b)}
-  sendReload(){this.raw(new Uint8Array([OP.Reload]))} switchSlot(slot:number){this.raw(new Uint8Array([OP.Switch,slot]))} setLoadout(primary:number,secondary:number,primaryWeaponSkin:number,secondaryWeaponSkin:number){this.raw(new Uint8Array([OP.Loadout,primary,secondary,primaryWeaponSkin,secondaryWeaponSkin]))} requestRoster(){this.raw(new Uint8Array([OP.RosterRequest]))} toggleFlight(){this.raw(new Uint8Array([OP.ToggleFlight]))}
+  sendReload(){this.raw(new Uint8Array([OP.Reload]))} switchSlot(slot:number){this.raw(new Uint8Array([OP.Switch,slot]))} setLoadout(primary:number,secondary:number,primaryWeaponSkin:number,secondaryWeaponSkin:number){this.raw(new Uint8Array([OP.Loadout,primary,secondary,primaryWeaponSkin,secondaryWeaponSkin]))} requestRoster(){this.raw(new Uint8Array([OP.RosterRequest]))} toggleFlight(){this.raw(new Uint8Array([OP.ToggleFlight]))} castUltimate(kind:number){this.raw(new Uint8Array([OP.Ultimate,kind]))} sendChat(text:string){const b=new TextEncoder().encode(text);const out=new Uint8Array(b.length+1);out[0]=OP.Chat;out.set(b,1);this.raw(out)}
   sendGrenade(yaw:number,pitch:number){const b=new Uint8Array(9),v=new DataView(b.buffer);b[0]=OP.Grenade;v.setFloat32(1,yaw,true);v.setFloat32(5,pitch,true);this.raw(b)}
   forget(id:number){this.states.delete(id)}
   disconnect(){this.closedByUser=true;if(this.heartbeat){clearInterval(this.heartbeat);this.heartbeat=0}const ws=this.ws;if(ws){ws.onopen=null;ws.onmessage=null;ws.onclose=null;if(ws.readyState<2)ws.close()}this.connected=false;this.states.clear()}

@@ -6,7 +6,7 @@ import { Weapons } from './weapons.js';
 import { Hud } from './hud.js';
 import { AudioEngine, type SfxName } from './audio.js';
 import { ParticleSystem } from './particles.js';
-import { KEY, PHYS, WEAPONS, XM_PELLETS, isGun, isPistol, isShotgun, isSniper, scopeSettleMs, type MapData, type PlayerSnap, type RosterEntry, type WeaponDef } from './constants.js';
+import { KEY, PHYS, WEAPONS, XM_PELLETS, ULTIMATE_REQUIREMENT, isGun, isPistol, isShotgun, isSniper, scopeSettleMs, type MapData, type PlayerSnap, type RosterEntry, type WeaponDef } from './constants.js';
 import bundledMap from '../../map.json';
 
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -86,6 +86,10 @@ let landingPenaltyUntil = 0;
 let aimStartedAt = 0;
 let awpRescopeAt = 0;
 let speedBoostUntil = 0;
+let ultimatePoints = 0;
+let ultimateKind = 0;
+let ultimateUntil = 0;
+let blackDreamUntil = 0;
 let patternShots = 0;
 let lastPatternShot = 0;
 let latencyMs = 0;
@@ -442,6 +446,13 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (!joined || interactive) return;
+  if (e.code === 'KeyT' && !e.repeat && !e.metaKey && !e.altKey && !e.ctrlKey) {
+    e.preventDefault();
+    clearCombatInput();
+    hud.setChatInputOpen(true);
+    hud.chatInput.focus();
+    return;
+  }
   if (e.metaKey || e.altKey) return;
   if (e.ctrlKey && e.code !== 'ControlLeft' && e.code !== 'ControlRight') {
     if (!/^(Key[WASDRG]|Digit[1234]|Space)$/.test(e.code)) return;
@@ -457,6 +468,14 @@ window.addEventListener('keydown', (e) => {
   if (!alive) return;
   keys.add(e.code);
   if (e.repeat) return;
+  if (/^Key(?:Z|X|V)$/.test(e.code)) {
+    const kind = e.code === 'KeyZ' ? 1 : e.code === 'KeyX' ? 2 : 3;
+    if (ultimatePoints >= ULTIMATE_REQUIREMENT) {
+      net.castUltimate(kind);
+      hud.toggleUltimateSelector(false);
+    }
+    return;
+  }
   if (/^Digit[1234]$/.test(e.code)) {
     e.preventDefault();
     selectSlot(+e.code.at(-1)!);
@@ -1180,6 +1199,12 @@ net.onSnapshot = (_tick, _ack, updates) => {
       hud.setHp(p.hp);
       hud.setArmor(p.armor);
       hud.setSpawnShield(!!(p.state & 2));
+      // 黑梦只影响其他真人玩家；发起者自己视线不变暗。
+      if (p.id !== net.yourId && p.ultimate === 1) {
+        blackDreamUntil = performance.now() + 10000;
+      } else if (p.id !== net.yourId && p.ultimate !== 1) {
+        blackDreamUntil = 0;
+      }
       continue;
     }
     remotes.sample(p, now);
@@ -1188,6 +1213,9 @@ net.onSnapshot = (_tick, _ack, updates) => {
 
 net.onSelf = (s) => {
   nades = s.nades;
+  ultimatePoints = s.ultimatePoints;
+  ultimateKind = s.ultimate;
+  hud.setUltimate(ultimatePoints, ultimateKind);
   if (s.slot === 1) primaryWeapon = s.weapon;
   else if (s.slot === 2) secondaryWeapon = s.weapon;
   if (s.slot === 1) primaryWeaponSkin = s.weaponSkin;
@@ -1228,6 +1256,10 @@ net.onEvents = (events) => {
 };
 
 function handleEvent(e: GameEvent) {
+  if (e.type === 17) {
+    hud.addChatMessage(e.name ?? nameOf(e.player), e.message ?? '', e.player === net.yourId);
+    return;
+  }
   if (e.type === 14) {
     hud.showRevengeAnnouncement(e.name ?? nameOf(e.player));
     return;
@@ -1243,6 +1275,15 @@ function handleEvent(e: GameEvent) {
     const mine = e.killer === net.yourId || e.victim === net.yourId;
     hud.killFeedEntry(killer, victim, e.weapon ?? 3, e.headshot === 1, mine);
     if (e.killer === net.yourId && e.victim !== net.yourId) {
+      // 大招期间不涨点，本地先预估，服务端 SelfState 会同步修正
+      if (ultimateKind === 0) {
+        ultimatePoints++;
+        hud.showKillPoint(ultimatePoints);
+        hud.setUltimate(ultimatePoints, ultimateKind);
+        if (ultimatePoints >= ULTIMATE_REQUIREMENT) {
+          hud.showUltimateReady();
+        }
+      }
       hud.showKillStreak(++killStreak, e.headshot === 1);
       hud.showKillMedal(e.headshot === 1);
       audio.play(e.headshot === 1 ? 'headshot_kill' : 'kill_confirm', 0.9, 1, 0, true);
@@ -1257,7 +1298,7 @@ function handleEvent(e: GameEvent) {
     if (k) k.kills++;
     if (v) v.deaths++;
     refreshScoreboard();
-    if (e.victim === net.yourId) {
+  if (e.victim === net.yourId) {
       killStreak = 0;
       alive = false;
       weapons.group.visible = false;
@@ -1266,6 +1307,11 @@ function handleEvent(e: GameEvent) {
       weapons.cancelReload();
       speedBoostUntil = 0;
       recoilBoostUntil = 0;
+      ultimatePoints = 0;
+      ultimateKind = 0;
+      ultimateUntil = 0;
+      blackDreamUntil = 0;
+      hud.setUltimate(ultimatePoints, ultimateKind);
       local.flying = false;
       hud.setFlightState(false, false);
       clearCombatInput();
@@ -1321,6 +1367,11 @@ function handleEvent(e: GameEvent) {
     landingPenaltyUntil = 0;
     speedBoostUntil = 0;
     recoilBoostUntil = 0;
+    ultimatePoints = 0;
+    ultimateKind = 0;
+    ultimateUntil = 0;
+    blackDreamUntil = 0;
+    hud.setUltimate(ultimatePoints, ultimateKind);
     patternShots = 0;
     reloadPendingSlot = 0;
     weapons.cancelReload();
@@ -1331,6 +1382,33 @@ function handleEvent(e: GameEvent) {
     cameraCorrection.set(0, 0, 0);
     weapons.group.visible = true;
     refreshWeaponHud();
+    return;
+  }
+  if (e.type === 16 && e.player !== undefined) {
+    if ((e.ms ?? 0) > 0) {
+      // 有人开启大招，全局广播
+      const playerName = e.name ?? nameOf(e.player);
+      hud.showUltimateAnnouncement(e.kind ?? 0, playerName);
+    }
+    if (e.player === net.yourId) {
+      if ((e.ms ?? 0) > 0) {
+        ultimateKind = e.kind ?? 0;
+        ultimateUntil = performance.now() + (e.ms ?? 0);
+        // 发起者自己不受黑梦影响。
+        blackDreamUntil = 0;
+      } else {
+        ultimateKind = 0;
+        ultimateUntil = 0;
+        blackDreamUntil = 0;
+      }
+      hud.setUltimate(ultimatePoints, ultimateKind);
+    } else if ((e.ms ?? 0) > 0 && e.kind === 1) {
+      // 其他真人开启黑梦，本地进入被影响状态。
+      blackDreamUntil = performance.now() + (e.ms ?? 0);
+    } else if (e.kind === 1) {
+      // 其他真人的黑梦结束。
+      blackDreamUntil = 0;
+    }
     return;
   }
   if (e.type === 5) {
@@ -1428,6 +1506,10 @@ function handleEvent(e: GameEvent) {
   }
 }
 
+hud.onChatSubmit = (text) => {
+  if (!practice) net.sendChat(text);
+};
+
 function nameOf(id?: number): string {
   const known = id === net.yourId ? myName : names.get(id ?? -1);
   return known?.trim() || `特战队员${id ?? '?'}`;
@@ -1467,7 +1549,7 @@ function frame(t: number) {
   if (document.hidden) return;
 
   if (joined && alive) {
-    local.speedMultiplier = t < speedBoostUntil ? SPEED_BOOST_MULTIPLIER : 1;
+    local.speedMultiplier = (t < speedBoostUntil ? SPEED_BOOST_MULTIPLIER : 1) * (ultimateKind === 3 && t < ultimateUntil ? 1.45 : 1);
     local.keys = keyMask();
     let remaining = dt;
     let landed = false;
@@ -1619,6 +1701,7 @@ function frame(t: number) {
   updateGrenadePreview(t);
 
   if (joined) {
+    hud.setBlackDream(t < blackDreamUntil);
     remotes.update(t);
     particles.update(dt, t, world);
     world?.animate(t);

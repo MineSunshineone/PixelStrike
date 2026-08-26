@@ -15,26 +15,37 @@ func TestWelcomeV6(t *testing.T) {
 		t.Fatalf("bad welcome: %v", b)
 	}
 }
-func TestSnapshotCarriesSkin(t *testing.T) {
+func TestSnapshotCarriesSkinAndUltimate(t *testing.T) {
 	p := &Player{PlayerState: PlayerState{Id: 1, Alive: true, Skin: 7, WeaponSkin: 2}}
 	state := quantizeState(&p.PlayerState, 0)
-	full := p.BuildSnapshot(0, []*Player{p}, []quantState{state})
-	if len(full) != 31 || full[7] != 1 || binary.LittleEndian.Uint16(full[10:]) != 0x8000 || full[29] != 7 || full[30] != 2 {
+	full := p.BuildSnapshot(0, []*Player{p}, []quantState{state}, time.Unix(0, 0))
+	if len(full) != 32 || full[7] != 1 || binary.LittleEndian.Uint16(full[10:]) != 0x8000 || full[29] != 7 || full[30] != 2 || full[31] != 0 {
 		t.Fatalf("full skin snapshot = %v", full)
+	}
+	p.Ultimate = UltimateGhost
+	state = quantizeState(&p.PlayerState, 1000)
+	clear(p.netCache)
+	ultimateFull := p.BuildSnapshot(1, []*Player{p}, []quantState{state}, time.Unix(1000, 0))
+	if len(ultimateFull) != 32 || ultimateFull[31] != UltimateGhost {
+		t.Fatalf("ultimate full snapshot = %v", ultimateFull)
 	}
 
 	p.Skin = 3
+	p.Ultimate = 0
 	state = quantizeState(&p.PlayerState, 0)
-	delta := p.BuildSnapshot(1, []*Player{p}, []quantState{state})
-	if len(delta) != 13 || binary.LittleEndian.Uint16(delta[10:]) != 1<<9 || delta[12] != 3 {
-		t.Fatalf("delta skin snapshot = %v", delta)
+	clear(p.netCache)
+	p.netFullAt = map[uint16]uint32{1: 2}
+	skinDelta := p.BuildSnapshot(2, []*Player{p}, []quantState{state}, time.Unix(0, 0))
+	if len(skinDelta) != 32 || binary.LittleEndian.Uint16(skinDelta[10:]) != 1<<15 || skinDelta[29] != 3 || skinDelta[31] != 0 {
+		t.Fatalf("delta skin snapshot = %v", skinDelta)
 	}
 
 	p.WeaponSkin = 1
 	state = quantizeState(&p.PlayerState, 0)
-	delta = p.BuildSnapshot(2, []*Player{p}, []quantState{state})
-	if len(delta) != 13 || binary.LittleEndian.Uint16(delta[10:]) != 1<<10 || delta[12] != 1 {
-		t.Fatalf("delta weapon skin snapshot = %v", delta)
+	clear(p.netCache)
+	weaponSkinDelta := p.BuildSnapshot(3, []*Player{p}, []quantState{state}, time.Unix(0, 0))
+	if len(weaponSkinDelta) != 32 || binary.LittleEndian.Uint16(weaponSkinDelta[10:]) != 1<<15 || weaponSkinDelta[30] != 1 {
+		t.Fatalf("delta weapon skin snapshot = %v", weaponSkinDelta)
 	}
 }
 
@@ -42,10 +53,11 @@ func TestUnchangedSnapshotIsSkipped(t *testing.T) {
 	p := &Player{PlayerState: PlayerState{Id: 1, Alive: true}}
 	players := []*Player{p}
 	states := []quantState{quantizeState(&p.PlayerState, 0)}
-	if first := p.BuildSnapshot(0, players, states); first == nil {
+	now := time.Unix(0, 0)
+	if first := p.BuildSnapshot(0, players, states, now); first == nil {
 		t.Fatal("initial snapshot was skipped")
 	}
-	if unchanged := p.BuildSnapshot(1, players, states); unchanged != nil {
+	if unchanged := p.BuildSnapshot(1, players, states, now); unchanged != nil {
 		t.Fatalf("unchanged snapshot = %v, want nil", unchanged)
 	}
 }
@@ -84,7 +96,7 @@ func TestSnapshotDropForcesKeyframe(t *testing.T) {
 	state := quantizeState(&p.PlayerState, time.Now().UnixNano())
 	p.netCache = map[uint16]quantState{1: state}
 	p.netFullAt = map[uint16]uint32{1: 1}
-	snapshot := p.BuildSnapshot(2, []*Player{p}, []quantState{state})
+	snapshot := p.BuildSnapshot(2, []*Player{p}, []quantState{state}, time.Unix(0, 0))
 	if len(snapshot) < 12 || binary.LittleEndian.Uint16(snapshot[10:]) != 0x8000 {
 		t.Fatalf("snapshot after drop is not a keyframe: %v", snapshot)
 	}
@@ -121,6 +133,99 @@ func TestBalanceValues(t *testing.T) {
 	}
 	if len(r.pending) != 2 || r.pending[0].Type != EvHit || r.pending[1].Type != EvKill {
 		t.Fatalf("unexpected lethal events: %#v", r.pending)
+	}
+}
+
+func TestUltimatePointsAndDeathReset(t *testing.T) {
+	r := &Room{}
+	store, err := NewStore(t.TempDir() + "/stats.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	r.Store = store
+	attacker := &PlayerState{Id: 1, Alive: true, IsBot: false, HP: MaxHP}
+	human := &PlayerState{Id: 2, Alive: true, IsBot: false, HP: 1}
+	bot := &PlayerState{Id: 3, Alive: true, IsBot: true, HP: 1}
+	now := time.Unix(1, 0)
+	r.Damage(attacker, bot, 10, false, 3, now)
+	if attacker.UltimatePoints != 1 {
+		t.Fatalf("bot kill points = %d, want 1", attacker.UltimatePoints)
+	}
+	for i := 2; i < UltimateRequirement; i++ {
+		human.HP = 1
+		human.Alive = true
+		r.Damage(attacker, human, 10, false, 3, now)
+		if int(attacker.UltimatePoints) != i {
+			t.Fatalf("human kill points = %d, want %d", attacker.UltimatePoints, i)
+		}
+	}
+	human.HP = 1
+	human.Alive = true
+	r.Damage(attacker, human, 10, false, 3, now)
+	if !r.CastUltimate(attacker, UltimateGhost, now) || attacker.UltimatePoints != 0 {
+		t.Fatalf("ghost cast failed: points=%d ultimate=%d", attacker.UltimatePoints, attacker.Ultimate)
+	}
+	if !attacker.GhostAt(now) {
+		t.Fatal("ghost state inactive")
+	}
+
+	attacker.HP = 1
+	r.Damage(human, attacker, 10, false, 3, now)
+	if attacker.Ultimate != 0 || !attacker.GhostUntil.IsZero() {
+		t.Fatalf("death did not reset ultimate: %d %v", attacker.Ultimate, attacker.GhostUntil)
+	}
+}
+
+func TestUltimateEffects(t *testing.T) {
+	r := &Room{World: &World{}, history: make(map[uint16]*poseHistory)}
+	blackDream := &PlayerState{Id: 1, Alive: true, IsBot: true}
+	bot := &PlayerState{Id: 2, Alive: true, IsBot: true}
+	human := &PlayerState{Id: 3, Alive: true}
+	ghost := &PlayerState{Id: 4, Alive: true}
+	invincible := &PlayerState{Id: 5, Alive: true, HP: 1}
+	players := []*Player{
+		{PlayerState: *blackDream},
+		{PlayerState: *bot},
+		{PlayerState: *human},
+		{PlayerState: *ghost},
+		{PlayerState: *invincible},
+	}
+	for _, p := range players {
+		p.ApplyLoadout(3, 0)
+	}
+	blackDream, bot, human, ghost, invincible = &players[0].PlayerState, &players[1].PlayerState, &players[2].PlayerState, &players[3].PlayerState, &players[4].PlayerState
+	r.Players = players
+	now := time.Unix(1, 0)
+	blackDream.UltimatePoints = UltimateRequirement
+	ghost.UltimatePoints = UltimateRequirement
+	invincible.UltimatePoints = UltimateRequirement
+	if !r.CastUltimate(blackDream, UltimateBlackDream, now) || !r.AnyBlackDream(now) {
+		t.Fatalf("black dream cast failed: points=%d ultimate=%d", blackDream.UltimatePoints, blackDream.Ultimate)
+	}
+	bot.NextFire = time.Time{}
+	if r.TryFire(bot, 0, 0, 0, 0, 1, now) {
+		t.Fatal("bot fired during black dream")
+	}
+	if !r.TryFire(human, 0, 0, 0, 0, 1, now) {
+		t.Fatal("human was forbidden to fire during black dream")
+	}
+
+	if !r.CastUltimate(ghost, UltimateGhost, now) {
+		t.Fatal("ghost cast failed")
+	}
+	startSpeed := WalkSpeed * Weapons[3].SpeedMult
+	r.Move(ghost, now)
+	if got := math.Hypot(ghost.Vel.X, ghost.Vel.Z); got > startSpeed*GhostSpeedMultiplier+1e-9 {
+		t.Fatalf("ghost exceeded capped speed: %.3f", got)
+	}
+
+	if !r.CastUltimate(invincible, UltimateInvincible, now) {
+		t.Fatal("invincible cast failed")
+	}
+	r.Damage(human, invincible, 100, false, 3, now)
+	if invincible.HP != 1 || !invincible.Alive {
+		t.Fatalf("invincible player took damage: hp=%d alive=%v", invincible.HP, invincible.Alive)
 	}
 }
 
@@ -319,7 +424,7 @@ func TestKnifeAttackDoesNotRequireAmmoAndRespectsCadence(t *testing.T) {
 		t.Fatalf("light knife attack failed: hp=%d next=%v", victim.HP, attacker.NextFire.Sub(start))
 	}
 	victim.HP, victim.Alive = MaxHP, true
-	heavyAt := start.Add(KnifeSlashInterval)
+	heavyAt := start.Add(KnifeSlashInterval + 200*time.Millisecond)
 	if !r.TryFire(&attacker.PlayerState, 0, 0, 1, 0, 2, heavyAt) || victim.HP != 45 || attacker.NextFire.Sub(heavyAt) != KnifeHeavyInterval {
 		t.Fatalf("heavy knife attack failed: hp=%d next=%v", victim.HP, attacker.NextFire.Sub(heavyAt))
 	}
@@ -437,13 +542,13 @@ func TestSnapshotOrdersNearbyPlayersFirst(t *testing.T) {
 	for i, p := range players {
 		states[i] = quantizeState(&p.PlayerState, 0)
 	}
-	snap := recv.BuildSnapshot(0, players, states)
+	snap := recv.BuildSnapshot(0, players, states, time.Unix(0, 0))
 	if snap[7] != 3 {
 		t.Fatalf("expected 3 players, got %d", snap[7])
 	}
 	id0 := binary.LittleEndian.Uint16(snap[8:])
-	id1 := binary.LittleEndian.Uint16(snap[8+23:])
-	id2 := binary.LittleEndian.Uint16(snap[8+46:])
+	id1 := binary.LittleEndian.Uint16(snap[8+24:])
+	id2 := binary.LittleEndian.Uint16(snap[8+48:])
 	if id0 != 5 || id1 != 2 || id2 != 1 {
 		t.Fatalf("snapshot order = %d,%d,%d want self,near,far", id0, id1, id2)
 	}
@@ -495,10 +600,10 @@ func TestDeltaSnapshotIsSmallerThanKeyframe(t *testing.T) {
 	other.ApplyLoadout(4, 0)
 	players := []*Player{receiver, other}
 	states := quantizePlayers(nil, players, now.UnixNano())
-	full := receiver.BuildSnapshot(0, players, states)
+	full := receiver.BuildSnapshot(0, players, states, now)
 	other.Pos.X += .1
 	states = quantizePlayers(states, players, now.UnixNano())
-	delta := receiver.BuildSnapshot(2, players, states)
+	delta := receiver.BuildSnapshot(2, players, states, now)
 	if len(delta) >= len(full) || delta[7] == 0 {
 		t.Fatalf("full=%d delta=%d records=%d", len(full), len(delta), delta[7])
 	}
@@ -643,6 +748,22 @@ func TestEventsNeverSplitsUTF8Rune(t *testing.T) {
 	}
 	if !strings.HasPrefix(name, got) || len(got)%3 != 0 {
 		t.Fatalf("bad truncation: %q", got)
+	}
+}
+
+func TestChatEncodingAndSanitize(t *testing.T) {
+	text := "  收到，A点集合！\n\r\u0000  "
+	want := "收到，A点集合！"
+	if got := sanitizeChat(text); got != want {
+		t.Fatalf("sanitizeChat = %q, want %q", got, want)
+	}
+	long := strings.Repeat("汉", 140)
+	if got := sanitizeChat(long); len([]rune(got)) != maxChatRunes {
+		t.Fatalf("sanitized chat rune count = %d", len([]rune(got)))
+	}
+	b := Events([]Event{{Type: EvChat, Player: 7, Name: "甲", Message: "你好"}})
+	if len(b) != 16 || b[0] != OpEvents || b[1] != 1 || b[2] != EvChat || binary.LittleEndian.Uint16(b[3:]) != 7 || b[5] != 3 || string(b[6:9]) != "甲" || b[9] != 6 || string(b[10:]) != "你好" {
+		t.Fatalf("bad chat event: %v", b)
 	}
 }
 

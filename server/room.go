@@ -124,7 +124,7 @@ func (r *Room) Run() {
 				}
 				out := outbound{p: p}
 				if needSnap {
-					out.snapshot = p.BuildSnapshot(r.tick, players, r.quantizedBuf)
+					out.snapshot = p.BuildSnapshot(r.tick, players, r.quantizedBuf, now)
 					self := compactSelf(&p.PlayerState)
 					if r.tick%60 == 0 || !p.hasLastSelf || self != p.lastSelf {
 						out.self = SelfState(&p.PlayerState)
@@ -183,7 +183,9 @@ func (r *Room) eventsFor(target *Player, evts []Event) []Event {
 	for _, e := range evts {
 		send := false
 		switch e.Type {
-		case EvKill, EvPlayerName, EvPlayerLeave, EvFlightToggle, EvRevenge, EvBondEvent:
+		case EvKill, EvPlayerName, EvPlayerLeave, EvFlightToggle, EvRevenge, EvBondEvent, EvChat:
+			send = true
+		case EvUltimate:
 			send = true
 		case EvStreakBuff:
 			send = e.Player == target.Id
