@@ -629,6 +629,63 @@ func TestEventsNeverSplitsUTF8Rune(t *testing.T) {
 	}
 }
 
+func TestBondAvengeSurvivesRespawnAndScoresOnce(t *testing.T) {
+	now := time.Unix(100, 0)
+	attacker := &Player{PlayerState: PlayerState{Id: 1, IsBot: true, Alive: true, BondMate: 2}}
+	mate := &Player{PlayerState: PlayerState{Id: 2, IsBot: true, BondMate: 1, LastKiller: 3, KilledAt: now, Pos: Vec3{X: 100}}}
+	killer := &Player{PlayerState: PlayerState{Id: 3, IsBot: true, Alive: true, HP: 1}}
+	r := &Room{World: &World{Spawns: [][3]float64{{100, 0, 0}}}, Players: []*Player{attacker, mate, killer}, history: make(map[uint16]*poseHistory)}
+	r.Respawn(&mate.PlayerState, now.Add(RespawnDelayS))
+	if mate.LastKiller != killer.Id {
+		t.Fatal("respawn cleared the active revenge target")
+	}
+	r.pending = nil
+	r.Damage(&attacker.PlayerState, &killer.PlayerState, 10, false, 3, now.Add(4*time.Second))
+	if attacker.BondScore != 1 || mate.LastKiller != 0 {
+		t.Fatalf("revenge score=%d last killer=%d", attacker.BondScore, mate.LastKiller)
+	}
+	bondEvents := 0
+	for _, e := range r.pending {
+		if e.Type == EvBondEvent {
+			bondEvents++
+			if e.Kind != 1 || e.Dmg != 1 {
+				t.Fatalf("bad revenge event: %#v", e)
+			}
+		}
+	}
+	if bondEvents != 1 {
+		t.Fatalf("revenge emitted %d bond events", bondEvents)
+	}
+
+	r.pending = nil
+	killer.Alive, killer.HP = true, 1
+	r.Damage(&attacker.PlayerState, &killer.PlayerState, 10, false, 3, now.Add(5*time.Second))
+	for _, e := range r.pending {
+		if e.Type == EvBondEvent {
+			t.Fatalf("same death rewarded twice: %#v", e)
+		}
+	}
+}
+
+func TestKillingBondMateIsNotCover(t *testing.T) {
+	attacker := &Player{PlayerState: PlayerState{Id: 1, IsBot: true, Alive: true, BondMate: 2}}
+	mate := &Player{PlayerState: PlayerState{Id: 2, IsBot: true, Alive: true, HP: 1, BondMate: 1}}
+	r := &Room{Players: []*Player{attacker, mate}, history: make(map[uint16]*poseHistory)}
+	r.Damage(&attacker.PlayerState, &mate.PlayerState, 10, false, 3, time.Unix(1, 0))
+	for _, e := range r.pending {
+		if e.Type == EvBondEvent {
+			t.Fatalf("killing the bond mate emitted cover: %#v", e)
+		}
+	}
+}
+
+func TestBondEventEncoding(t *testing.T) {
+	b := Events([]Event{{Type: EvBondEvent, Player: 1, Victim: 2, Kind: 1, Dmg: 7, Name: "甲"}})
+	if len(b) != 13 || b[0] != OpEvents || b[1] != 1 || b[2] != EvBondEvent || binary.LittleEndian.Uint16(b[3:]) != 1 || binary.LittleEndian.Uint16(b[5:]) != 2 || b[7] != 1 || b[8] != 7 || b[9] != 3 || string(b[10:]) != "甲" {
+		t.Fatalf("bad bond event: %v", b)
+	}
+}
+
 func TestPoseHistoryRing(t *testing.T) {
 	p := &Player{PlayerState: PlayerState{Id: 1}}
 	r := &Room{Players: []*Player{p}, history: make(map[uint16]*poseHistory)}

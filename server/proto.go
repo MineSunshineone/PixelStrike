@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 )
 
-const ProtocolVersion = 8
+const ProtocolVersion = 9
 const SkinCount uint8 = 8
 
 const (

@@ -127,9 +127,7 @@ export class Hud {
   private lastAmmo = '';
   private hurtTimer = 0;
   private toastTimer = 0;
-  private flightTimer = 0;
-  private revengeTimer = 0;
-  private bondTimer = 0;
+  private announcementTimer = 0;
   private reconnectTimer = 0;
   private refreshWeaponProgress: (() => void) | null = null;
 
@@ -891,44 +889,39 @@ export class Hud {
   showFlightAnnouncement(name: string) {
     const banner = el('flight-announcement');
     banner.textContent = `${name || '特战队员'} 能飞`;
-    banner.classList.remove('revenge');
-    banner.classList.remove('show');
+    banner.classList.remove('revenge', 'bond', 'show');
     void banner.offsetWidth;
     banner.classList.add('show');
-    clearTimeout(this.flightTimer);
-    this.flightTimer = window.setTimeout(() => banner.classList.remove('show'), 2600);
+    clearTimeout(this.announcementTimer);
+    this.announcementTimer = window.setTimeout(() => banner.classList.remove('show'), 2600);
   }
 
   showRevengeAnnouncement(name: string) {
     const banner = el('flight-announcement');
     banner.textContent = `（${name || '玩家'}）来复仇了！`;
+    banner.classList.remove('bond', 'show');
     banner.classList.add('revenge');
-    banner.classList.remove('show');
     void banner.offsetWidth;
     banner.classList.add('show');
-    clearTimeout(this.revengeTimer);
-    this.revengeTimer = window.setTimeout(() => {
-      banner.classList.remove('show', 'revenge');
-    }, 4000);
+    clearTimeout(this.announcementTimer);
+    this.announcementTimer = window.setTimeout(() => banner.classList.remove('show', 'revenge'), 4000);
   }
 
   showBondEvent(kind: number, name: string, score: number) {
     const banner = el('flight-announcement');
-    const BOND_MESSAGES: Record<number, string> = {
-      0: `💕 ${name || '羁绊者'} 守护了TA · 羁绊值 ${score}`,
-      1: `🔥 ${name || '羁绊者'} 为TA报仇了 · 羁绊值 ${score}`,
-      2: `⚡ ${name || '羁绊者'} 心有灵犀 · 羁绊值 ${score}`,
-      3: `💘 ${name || '特战队员'} 缔结战场羁绊`,
-    };
-    banner.textContent = BOND_MESSAGES[kind] ?? BOND_MESSAGES[0];
-    banner.classList.add('bond');
+    const actor = name || (kind === 3 ? '特战队员' : '羁绊者');
+    switch (kind) {
+      case 1: banner.textContent = `🔥 ${actor} 为TA报仇了 · 羁绊值 ${score}`; break;
+      case 2: banner.textContent = `⚡ ${actor} 心有灵犀 · 羁绊值 ${score}`; break;
+      case 3: banner.textContent = `💘 ${actor} 缔结战场羁绊`; break;
+      default: banner.textContent = `💕 ${actor} 守护了TA · 羁绊值 ${score}`;
+    }
     banner.classList.remove('revenge', 'show');
+    banner.classList.add('bond');
     void banner.offsetWidth;
     banner.classList.add('show');
-    clearTimeout(this.bondTimer);
-    this.bondTimer = window.setTimeout(() => {
-      banner.classList.remove('show', 'bond');
-    }, 3200);
+    clearTimeout(this.announcementTimer);
+    this.announcementTimer = window.setTimeout(() => banner.classList.remove('show', 'bond'), 3200);
   }
 
 
