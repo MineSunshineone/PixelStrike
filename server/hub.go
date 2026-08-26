@@ -30,7 +30,9 @@ type AdminPlayer struct {
 	Deaths uint16 `json:"deaths"`
 }
 
-func NewHub(w *World, s *Store) *Hub { return &Hub{World: w, Store: s, botCount: 8} }
+func NewHub(w *World, s *Store) *Hub {
+	return &Hub{World: w, Store: s, botCount: int(s.GetMeta("bot_count"))}
+}
 
 func (h *Hub) Broadcast(msg []byte) {
 	h.mu.Lock()
@@ -121,10 +123,13 @@ func (h *Hub) KickIP(ip string) int {
 	return len(kicked)
 }
 
-func (h *Hub) SetBotCount(count int) (int, int) {
+func (h *Hub) SetBotCount(count int) (int, int, error) {
 	count = max(0, min(count, len(BotNames)))
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if err := h.Store.SetMeta("bot_count", int64(count)); err != nil {
+		return h.botCount, len(h.rooms), err
+	}
 	h.botCount = count
 	active := 0
 	for _, room := range h.rooms {
@@ -135,7 +140,7 @@ func (h *Hub) SetBotCount(count int) (int, int) {
 		}
 		room.mu.Unlock()
 	}
-	return count, active
+	return count, active, nil
 }
 
 func (h *Hub) Join(p *Player, account, name string, primary, secondary, skin, primaryWeaponSkin, secondaryWeaponSkin uint8) {

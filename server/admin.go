@@ -245,7 +245,11 @@ func registerAdminHandlers(mux *http.ServeMux, hub *Hub, store *Store, password 
 				adminError(w, http.StatusBadRequest, "bots must be an integer from 0 to 12")
 				return
 			}
-			count, rooms := hub.SetBotCount(request.Bots)
+			count, rooms, err := hub.SetBotCount(request.Bots)
+			if err != nil {
+				adminError(w, http.StatusInternalServerError, "failed to save bot setting")
+				return
+			}
 			writeAdminJSON(w, http.StatusOK, map[string]int{"bots": count, "rooms": rooms})
 		default:
 			w.Header().Set("Allow", "GET, POST")

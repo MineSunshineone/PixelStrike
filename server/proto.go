@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 )
 
-const ProtocolVersion = 6
+const ProtocolVersion = 9
 const SkinCount uint8 = 8
 
 const (
@@ -19,6 +19,7 @@ const (
 	OpLoadout       = 0x09
 	OpRosterRequest = 0x0A
 	OpToggleFlight  = 0x0B
+	OpUltimate      = 0x0C
 
 	OpWelcome     = 0x81
 	OpSnapshot    = 0x82
@@ -46,6 +47,9 @@ const (
 	EvPickupTaken
 	EvFlightToggle
 	EvStreakBuff
+	EvRevenge
+	EvBondEvent
+	EvUltimate
 )
 
 type Event struct {
@@ -98,8 +102,8 @@ func Maintenance(retryAfter uint8) []byte {
 }
 
 type compactSelfState struct {
-	slot, weapon, weaponSkin, mag, nades uint8
-	reserve                              uint16
+	slot, weapon, weaponSkin, mag, nades, ultimatePoints, ultimate uint8
+	reserve                                                        uint16
 }
 
 func compactSelf(p *PlayerState) compactSelfState {
@@ -107,7 +111,7 @@ func compactSelf(p *PlayerState) compactSelfState {
 	return compactSelfState{
 		slot: p.ActiveSlot, weapon: p.Weapon, weaponSkin: p.WeaponSkin,
 		mag: uint8(max(0, min(mag, 255))), reserve: uint16(max(0, min(reserve, 65535))),
-		nades: uint8(max(0, min(p.Grenades, 255))),
+		nades: uint8(max(0, min(p.Grenades, 255))), ultimatePoints: p.UltimatePoints, ultimate: p.Ultimate,
 	}
 }
 
@@ -121,6 +125,8 @@ func SelfState(p *PlayerState) []byte {
 	w.U8(state.mag)
 	w.U16(state.reserve)
 	w.U8(state.nades)
+	w.U8(state.ultimatePoints)
+	w.U8(state.ultimate)
 	return w.Bytes()
 }
 
@@ -192,6 +198,26 @@ func Events(evts []Event) []byte {
 			w.U8(e.Kind)
 			w.U8(e.Dmg)
 			w.U16(e.Ms)
+		case EvRevenge:
+			w.U16(e.Player)
+			nb := safeNameBytes(e.Name)
+			w.U8(uint8(len(nb)))
+			w.b = append(w.b, nb...)
+		case EvBondEvent:
+			w.U16(e.Player)
+			w.U16(e.Victim)
+			w.U8(e.Kind)
+			w.U8(e.Dmg)
+			nb := safeNameBytes(e.Name)
+			w.U8(uint8(len(nb)))
+			w.b = append(w.b, nb...)
+		case EvUltimate:
+			w.U16(e.Player)
+			w.U8(e.Kind)
+			w.U16(e.Ms)
+			nb := safeNameBytes(e.Name)
+			w.U8(uint8(len(nb)))
+			w.b = append(w.b, nb...)
 		}
 	}
 	return w.Bytes()

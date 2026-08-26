@@ -323,6 +323,15 @@ func (p *Player) readPump(hub *Hub) {
 				}
 				room.mu.Unlock()
 			}
+		case OpUltimate:
+			if len(payload) < 1 {
+				continue
+			}
+			if room := p.Room; room != nil {
+				room.mu.Lock()
+				room.CastUltimate(&p.PlayerState, payload[0], now)
+				room.mu.Unlock()
+			}
 		case OpPing:
 			out := make([]byte, 5)
 			out[0] = OpPong

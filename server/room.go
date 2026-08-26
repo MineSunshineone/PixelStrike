@@ -35,6 +35,12 @@ func NewRoom(id int, w *World, s *Store) *Room {
 func (r *Room) Remove(p *Player) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Clear bond: if this player had a bond mate, break the bond
+	if p.BondMate != 0 {
+		if mate := r.findPlayer(p.BondMate); mate != nil {
+			mate.BondMate = 0
+		}
+	}
 	for i, q := range r.Players {
 		if q == p {
 			r.Players = append(r.Players[:i], r.Players[i+1:]...)
@@ -118,7 +124,7 @@ func (r *Room) Run() {
 				}
 				out := outbound{p: p}
 				if needSnap {
-					out.snapshot = p.BuildSnapshot(r.tick, players, r.quantizedBuf)
+					out.snapshot = p.BuildSnapshot(r.tick, players, r.quantizedBuf, now)
 					self := compactSelf(&p.PlayerState)
 					if r.tick%60 == 0 || !p.hasLastSelf || self != p.lastSelf {
 						out.self = SelfState(&p.PlayerState)
@@ -177,7 +183,9 @@ func (r *Room) eventsFor(target *Player, evts []Event) []Event {
 	for _, e := range evts {
 		send := false
 		switch e.Type {
-		case EvKill, EvPlayerName, EvPlayerLeave, EvFlightToggle:
+		case EvKill, EvPlayerName, EvPlayerLeave, EvFlightToggle, EvRevenge, EvBondEvent:
+			send = true
+		case EvUltimate:
 			send = true
 		case EvStreakBuff:
 			send = e.Player == target.Id

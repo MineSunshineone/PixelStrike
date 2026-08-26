@@ -201,6 +201,7 @@
     const banReasonInput = document.querySelector('#ban-reason');
     let pollTimer = 0;
     let overviewLoading = false;
+    let countDirty = false;
 
     function showCount(value) {
       const count = Math.max(0, Math.min(12, Number(value) || 0));
@@ -354,7 +355,7 @@
       setMetric('metric-dropped', data.droppedMessages);
       setMetric('metric-tick-p95', data.tickP95Ms);
       setMetric('metric-tick', data.tickP99Ms);
-      showCount(data.bots);
+      if (!countDirty) showCount(data.bots);
       roomStatus.textContent = `${rooms} 个活动房间 · ${new Date().toLocaleTimeString()}`;
       renderPlayers(Array.isArray(data.players) ? data.players : []);
       renderBans(Array.isArray(data.bans) ? data.bans : []);
@@ -393,12 +394,13 @@
       }
     });
 
-    countInput.addEventListener('input', () => showCount(countInput.value));
-    pills.forEach((button) => button.addEventListener('click', () => showCount(button.dataset.count)));
+    countInput.addEventListener('input', () => { countDirty = true; showCount(countInput.value); });
+    pills.forEach((button) => button.addEventListener('click', () => { countDirty = true; showCount(button.dataset.count); }));
     document.querySelector('#apply').addEventListener('click', async () => {
       setStatus(controlStatus, '正在同步…');
       try {
         const data = await request('/api/admin/bots', { method: 'POST', body: { bots: +countInput.value } });
+        countDirty = false;
         showCount(data.bots);
         await refreshOverview();
         setStatus(controlStatus, `已应用：每个房间 ${data.bots} 个人机`, 'ok');

@@ -602,15 +602,17 @@ export class WorldView {
     for (const geo of geos) geo.dispose();
     this.group.add(new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ color: 0xd2aa55, transparent: true, opacity: 0.78 })));
   }
-  raycastDistance(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number): number {
+  raycastDistance(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number, outNormal?: THREE.Vector3): number {
     let best = maxDist;
+    outNormal?.set(0, 1, 0);
     for (const b of this.boxes) {
       let tmin = 0, tmax = best;
+      let nx = 0, ny = 0, nz = 0;
       if (Math.abs(dir.x) < 1e-9) { if (origin.x < b.x0 || origin.x > b.x1) continue; }
       else {
         let t1 = (b.x0 - origin.x) / dir.x, t2 = (b.x1 - origin.x) / dir.x;
         if (t1 > t2) [t1, t2] = [t2, t1];
-        if (t1 > tmin) tmin = t1;
+        if (t1 > tmin) { tmin = t1; nx = dir.x > 0 ? -1 : 1; ny = nz = 0; }
         if (t2 < tmax) tmax = t2;
         if (tmin > tmax) continue;
       }
@@ -618,7 +620,7 @@ export class WorldView {
       else {
         let t1 = (b.y0 - origin.y) / dir.y, t2 = (b.y1 - origin.y) / dir.y;
         if (t1 > t2) [t1, t2] = [t2, t1];
-        if (t1 > tmin) tmin = t1;
+        if (t1 > tmin) { tmin = t1; ny = dir.y > 0 ? -1 : 1; nx = nz = 0; }
         if (t2 < tmax) tmax = t2;
         if (tmin > tmax) continue;
       }
@@ -626,11 +628,14 @@ export class WorldView {
       else {
         let t1 = (b.z0 - origin.z) / dir.z, t2 = (b.z1 - origin.z) / dir.z;
         if (t1 > t2) [t1, t2] = [t2, t1];
-        if (t1 > tmin) tmin = t1;
+        if (t1 > tmin) { tmin = t1; nz = dir.z > 0 ? -1 : 1; nx = ny = 0; }
         if (t2 < tmax) tmax = t2;
         if (tmin > tmax) continue;
       }
-      if (tmin > 0 && tmin < best) best = tmin;
+      if (tmin > 0 && tmin < best) {
+        best = tmin;
+        outNormal?.set(nx, ny, nz);
+      }
     }
     return best;
   }

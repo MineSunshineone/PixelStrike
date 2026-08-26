@@ -13,6 +13,7 @@ type quantState struct {
 	yaw, pitch                                       int16 // half-degrees
 	vx, vz                                           int8  // decimetres/second
 	hp, armor, state, weapon, shot, skin, weaponSkin uint8
+	ultimate                                         uint8
 }
 
 func quantizeState(p *PlayerState, nowUnixNano int64) quantState {
@@ -35,11 +36,14 @@ func quantizeState(p *PlayerState, nowUnixNano int64) quantState {
 	if p.Flying {
 		state |= 32
 	}
+	if p.UltimateInvincibleAt(time.Unix(0, nowUnixNano)) {
+		state |= 64
+	}
 	return quantState{
 		x: q16(p.Pos.X * 100), y: q16(p.Pos.Y * 100), z: q16(p.Pos.Z * 100),
 		yaw: angleHalfDeg(p.Yaw), pitch: angleHalfDeg(p.Pitch),
 		vx: q8(p.Vel.X * 10), vz: q8(p.Vel.Z * 10),
-		hp: p.HP, armor: p.Armor, state: state, weapon: p.Weapon, shot: uint8(p.LastShotSeq), skin: p.Skin, weaponSkin: p.WeaponSkin,
+		hp: p.HP, armor: p.Armor, state: state, weapon: p.Weapon, shot: uint8(p.LastShotSeq), skin: p.Skin, weaponSkin: p.WeaponSkin, ultimate: p.Ultimate,
 	}
 }
 
@@ -68,7 +72,7 @@ func quantizePlayers(dst []quantState, players []*Player, nowUnixNano int64) []q
 	return dst
 }
 
-func (p *Player) BuildSnapshot(tick uint32, players []*Player, states []quantState) []byte {
+func (p *Player) BuildSnapshot(tick uint32, players []*Player, states []quantState, now time.Time) []byte {
 	if p.netCache == nil {
 		p.netCache = make(map[uint16]quantState)
 		p.netFullAt = make(map[uint16]uint32)
@@ -77,7 +81,7 @@ func (p *Player) BuildSnapshot(tick uint32, players []*Player, states []quantSta
 		clear(p.netCache)
 		clear(p.netFullAt)
 	}
-	w := &Buf{b: p.snapshotBuffer(min(maxSnapshotBytes, 8+len(players)*22))}
+	w := &Buf{b: p.snapshotBuffer(min(maxSnapshotBytes, 8+len(players)*23))}
 	w.b[0] = OpSnapshot
 	w.U32(tick)
 	w.U16(p.LastInputSeq)
@@ -91,7 +95,7 @@ func (p *Player) BuildSnapshot(tick uint32, players []*Player, states []quantSta
 	}
 	cands := make([]cand, 0, len(players))
 	for i, other := range players {
-		if ok, distSq := snapshotVisible(&p.PlayerState, &other.PlayerState, tick); ok {
+		if ok, distSq := snapshotVisible(&p.PlayerState, &other.PlayerState, tick, now); ok {
 			cands = append(cands, cand{i: i, distSq: distSq})
 		}
 	}
@@ -120,12 +124,19 @@ func (p *Player) BuildSnapshot(tick uint32, players []*Player, states []quantSta
 		count++
 	}
 	w.b[countAt] = byte(count)
+	if count == 0 {
+		p.releaseSnapshot(w.b)
+		return nil
+	}
 	return w.Bytes()
 }
 
-func snapshotVisible(self, other *PlayerState, tick uint32) (bool, float64) {
+func snapshotVisible(self, other *PlayerState, tick uint32, now time.Time) (bool, float64) {
 	if other.Id == self.Id {
 		return true, -1
+	}
+	if self.BlackDreamAt(now) {
+		return false, 0
 	}
 	dx := other.Pos.X - self.Pos.X
 	dz := other.Pos.Z - self.Pos.Z
@@ -217,6 +228,9 @@ func appendStateDelta(w *Buf, id uint16, prev, cur quantState, full bool) bool {
 		if cur.weaponSkin != prev.weaponSkin {
 			flag |= 1 << 10
 		}
+		if cur.ultimate != prev.ultimate {
+			flag |= 1 << 11
+		}
 	}
 	if full || flag == 0 && (cur.x != prev.x || cur.y != prev.y || cur.z != prev.z || cur.yaw != prev.yaw || cur.pitch != prev.pitch) {
 		flag = 1 << 15
@@ -276,6 +290,9 @@ func appendStateDelta(w *Buf, id uint16, prev, cur quantState, full bool) bool {
 	if flag&(1<<10) != 0 {
 		w.U8(cur.weaponSkin)
 	}
+	if flag&(1<<11) != 0 {
+		w.U8(cur.ultimate)
+	}
 	if len(w.b) > maxSnapshotBytes {
 		w.b = w.b[:start]
 		return false
@@ -298,6 +315,7 @@ func writeFullState(w *Buf, s quantState) {
 	w.U8(s.shot)
 	w.U8(s.skin)
 	w.U8(s.weaponSkin)
+	w.U8(s.ultimate)
 }
 
 func inI8(v int) bool { return v >= -128 && v <= 127 }

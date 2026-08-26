@@ -15,26 +15,50 @@ func TestWelcomeV6(t *testing.T) {
 		t.Fatalf("bad welcome: %v", b)
 	}
 }
-func TestSnapshotCarriesSkin(t *testing.T) {
+func TestSnapshotCarriesSkinAndUltimate(t *testing.T) {
 	p := &Player{PlayerState: PlayerState{Id: 1, Alive: true, Skin: 7, WeaponSkin: 2}}
 	state := quantizeState(&p.PlayerState, 0)
-	full := p.BuildSnapshot(0, []*Player{p}, []quantState{state})
-	if len(full) != 31 || full[7] != 1 || binary.LittleEndian.Uint16(full[10:]) != 0x8000 || full[29] != 7 || full[30] != 2 {
+	full := p.BuildSnapshot(0, []*Player{p}, []quantState{state}, time.Unix(0, 0))
+	if len(full) != 32 || full[7] != 1 || binary.LittleEndian.Uint16(full[10:]) != 0x8000 || full[29] != 7 || full[30] != 2 || full[31] != 0 {
 		t.Fatalf("full skin snapshot = %v", full)
+	}
+	p.Ultimate = UltimateGhost
+	state = quantizeState(&p.PlayerState, 1000)
+	clear(p.netCache)
+	ultimateFull := p.BuildSnapshot(1, []*Player{p}, []quantState{state}, time.Unix(1000, 0))
+	if len(ultimateFull) != 32 || ultimateFull[31] != UltimateGhost {
+		t.Fatalf("ultimate full snapshot = %v", ultimateFull)
 	}
 
 	p.Skin = 3
+	p.Ultimate = 0
 	state = quantizeState(&p.PlayerState, 0)
-	delta := p.BuildSnapshot(1, []*Player{p}, []quantState{state})
-	if len(delta) != 13 || binary.LittleEndian.Uint16(delta[10:]) != 1<<9 || delta[12] != 3 {
-		t.Fatalf("delta skin snapshot = %v", delta)
+	clear(p.netCache)
+	p.netFullAt = map[uint16]uint32{1: 2}
+	skinDelta := p.BuildSnapshot(2, []*Player{p}, []quantState{state}, time.Unix(0, 0))
+	if len(skinDelta) != 32 || binary.LittleEndian.Uint16(skinDelta[10:]) != 1<<15 || skinDelta[29] != 3 || skinDelta[31] != 0 {
+		t.Fatalf("delta skin snapshot = %v", skinDelta)
 	}
 
 	p.WeaponSkin = 1
 	state = quantizeState(&p.PlayerState, 0)
-	delta = p.BuildSnapshot(2, []*Player{p}, []quantState{state})
-	if len(delta) != 13 || binary.LittleEndian.Uint16(delta[10:]) != 1<<10 || delta[12] != 1 {
-		t.Fatalf("delta weapon skin snapshot = %v", delta)
+	clear(p.netCache)
+	weaponSkinDelta := p.BuildSnapshot(3, []*Player{p}, []quantState{state}, time.Unix(0, 0))
+	if len(weaponSkinDelta) != 32 || binary.LittleEndian.Uint16(weaponSkinDelta[10:]) != 1<<15 || weaponSkinDelta[30] != 1 {
+		t.Fatalf("delta weapon skin snapshot = %v", weaponSkinDelta)
+	}
+}
+
+func TestUnchangedSnapshotIsSkipped(t *testing.T) {
+	p := &Player{PlayerState: PlayerState{Id: 1, Alive: true}}
+	players := []*Player{p}
+	states := []quantState{quantizeState(&p.PlayerState, 0)}
+	now := time.Unix(0, 0)
+	if first := p.BuildSnapshot(0, players, states, now); first == nil {
+		t.Fatal("initial snapshot was skipped")
+	}
+	if unchanged := p.BuildSnapshot(1, players, states, now); unchanged != nil {
+		t.Fatalf("unchanged snapshot = %v, want nil", unchanged)
 	}
 }
 
@@ -72,7 +96,7 @@ func TestSnapshotDropForcesKeyframe(t *testing.T) {
 	state := quantizeState(&p.PlayerState, time.Now().UnixNano())
 	p.netCache = map[uint16]quantState{1: state}
 	p.netFullAt = map[uint16]uint32{1: 1}
-	snapshot := p.BuildSnapshot(2, []*Player{p}, []quantState{state})
+	snapshot := p.BuildSnapshot(2, []*Player{p}, []quantState{state}, time.Unix(0, 0))
 	if len(snapshot) < 12 || binary.LittleEndian.Uint16(snapshot[10:]) != 0x8000 {
 		t.Fatalf("snapshot after drop is not a keyframe: %v", snapshot)
 	}
@@ -109,6 +133,99 @@ func TestBalanceValues(t *testing.T) {
 	}
 	if len(r.pending) != 2 || r.pending[0].Type != EvHit || r.pending[1].Type != EvKill {
 		t.Fatalf("unexpected lethal events: %#v", r.pending)
+	}
+}
+
+func TestUltimatePointsAndDeathReset(t *testing.T) {
+	r := &Room{}
+	store, err := NewStore(t.TempDir() + "/stats.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	r.Store = store
+	attacker := &PlayerState{Id: 1, Alive: true, IsBot: false, HP: MaxHP}
+	human := &PlayerState{Id: 2, Alive: true, IsBot: false, HP: 1}
+	bot := &PlayerState{Id: 3, Alive: true, IsBot: true, HP: 1}
+	now := time.Unix(1, 0)
+	r.Damage(attacker, bot, 10, false, 3, now)
+	if attacker.UltimatePoints != 1 {
+		t.Fatalf("bot kill points = %d, want 1", attacker.UltimatePoints)
+	}
+	for i := 2; i < UltimateRequirement; i++ {
+		human.HP = 1
+		human.Alive = true
+		r.Damage(attacker, human, 10, false, 3, now)
+		if int(attacker.UltimatePoints) != i {
+			t.Fatalf("human kill points = %d, want %d", attacker.UltimatePoints, i)
+		}
+	}
+	human.HP = 1
+	human.Alive = true
+	r.Damage(attacker, human, 10, false, 3, now)
+	if !r.CastUltimate(attacker, UltimateGhost, now) || attacker.UltimatePoints != 0 {
+		t.Fatalf("ghost cast failed: points=%d ultimate=%d", attacker.UltimatePoints, attacker.Ultimate)
+	}
+	if !attacker.GhostAt(now) {
+		t.Fatal("ghost state inactive")
+	}
+
+	attacker.HP = 1
+	r.Damage(human, attacker, 10, false, 3, now)
+	if attacker.Ultimate != 0 || !attacker.GhostUntil.IsZero() {
+		t.Fatalf("death did not reset ultimate: %d %v", attacker.Ultimate, attacker.GhostUntil)
+	}
+}
+
+func TestUltimateEffects(t *testing.T) {
+	r := &Room{World: &World{}, history: make(map[uint16]*poseHistory)}
+	blackDream := &PlayerState{Id: 1, Alive: true, IsBot: true}
+	bot := &PlayerState{Id: 2, Alive: true, IsBot: true}
+	human := &PlayerState{Id: 3, Alive: true}
+	ghost := &PlayerState{Id: 4, Alive: true}
+	invincible := &PlayerState{Id: 5, Alive: true, HP: 1}
+	players := []*Player{
+		{PlayerState: *blackDream},
+		{PlayerState: *bot},
+		{PlayerState: *human},
+		{PlayerState: *ghost},
+		{PlayerState: *invincible},
+	}
+	for _, p := range players {
+		p.ApplyLoadout(3, 0)
+	}
+	blackDream, bot, human, ghost, invincible = &players[0].PlayerState, &players[1].PlayerState, &players[2].PlayerState, &players[3].PlayerState, &players[4].PlayerState
+	r.Players = players
+	now := time.Unix(1, 0)
+	blackDream.UltimatePoints = UltimateRequirement
+	ghost.UltimatePoints = UltimateRequirement
+	invincible.UltimatePoints = UltimateRequirement
+	if !r.CastUltimate(blackDream, UltimateBlackDream, now) || !r.AnyBlackDream(now) {
+		t.Fatalf("black dream cast failed: points=%d ultimate=%d", blackDream.UltimatePoints, blackDream.Ultimate)
+	}
+	bot.NextFire = time.Time{}
+	if r.TryFire(bot, 0, 0, 0, 0, 1, now) {
+		t.Fatal("bot fired during black dream")
+	}
+	if !r.TryFire(human, 0, 0, 0, 0, 1, now) {
+		t.Fatal("human was forbidden to fire during black dream")
+	}
+
+	if !r.CastUltimate(ghost, UltimateGhost, now) {
+		t.Fatal("ghost cast failed")
+	}
+	startSpeed := WalkSpeed * Weapons[3].SpeedMult
+	r.Move(ghost, now)
+	if got := math.Hypot(ghost.Vel.X, ghost.Vel.Z); got > startSpeed*GhostSpeedMultiplier+1e-9 {
+		t.Fatalf("ghost exceeded capped speed: %.3f", got)
+	}
+
+	if !r.CastUltimate(invincible, UltimateInvincible, now) {
+		t.Fatal("invincible cast failed")
+	}
+	r.Damage(human, invincible, 100, false, 3, now)
+	if invincible.HP != 1 || !invincible.Alive {
+		t.Fatalf("invincible player took damage: hp=%d alive=%v", invincible.HP, invincible.Alive)
 	}
 }
 
@@ -250,6 +367,50 @@ func TestGrenadeThrowConsumesOnceAndEmitsTrajectory(t *testing.T) {
 	}
 }
 
+func TestRevengeShotHeadshotsAnyoneOnScreen(t *testing.T) {
+	now := time.Unix(1, 0)
+	attacker := &Player{PlayerState: PlayerState{
+		Id: 1, Alive: true, IsBot: true, HP: MaxHP, RevengeActive: true, RevengeShots: 10,
+		InvincibleUntil: now.Add(10 * time.Second),
+	}}
+	victim := &Player{PlayerState: PlayerState{
+		Id: 2, Alive: true, IsBot: true, HP: MaxHP, Armor: 100, Pos: Vec3{X: 8, Z: -6},
+	}}
+	attacker.ApplyLoadout(3, 0)
+	r := &Room{World: &World{}, Players: []*Player{attacker, victim}, history: make(map[uint16]*poseHistory)}
+	if !r.TryFire(&attacker.PlayerState, 0, 0, 0, 0, 1, now) {
+		t.Fatal("revenge shot rejected")
+	}
+	if victim.Alive || victim.HP != 0 {
+		t.Fatalf("on-screen target should be headshot without aiming: alive=%v hp=%d", victim.Alive, victim.HP)
+	}
+	if attacker.RevengeShots != 9 {
+		t.Fatalf("revenge ammo not consumed: %d", attacker.RevengeShots)
+	}
+	behind := &Player{PlayerState: PlayerState{Id: 3, Alive: true, IsBot: true, HP: MaxHP, Armor: 100, Pos: Vec3{Z: 8}}}
+	r.Players = []*Player{attacker, behind}
+	attacker.NextFire = time.Time{}
+	if !r.TryFire(&attacker.PlayerState, 0, 0, 0, 0, 2, now.Add(time.Second)) {
+		t.Fatal("second revenge shot rejected")
+	}
+	if !behind.Alive || behind.HP != MaxHP {
+		t.Fatal("player outside the view should not be auto-headshot")
+	}
+	if attacker.RevengeShots != 8 {
+		t.Fatalf("every gunshot should burn revenge ammo: %d", attacker.RevengeShots)
+	}
+	attacker.InvincibleUntil = now
+	attacker.NextFire = time.Time{}
+	next := &Player{PlayerState: PlayerState{Id: 4, Alive: true, IsBot: true, HP: MaxHP, Armor: 100, Pos: Vec3{X: -4, Z: -5}}}
+	r.Players = []*Player{attacker, next}
+	if !r.TryFire(&attacker.PlayerState, 0, 0, 0, 0, 3, now.Add(11*time.Second)) {
+		t.Fatal("revenge shot after invuln expired rejected")
+	}
+	if next.Alive || attacker.RevengeShots != 7 || !attacker.RevengeActive {
+		t.Fatalf("invuln expiry must not end the 10-shot budget: alive=%v shots=%d active=%v", next.Alive, attacker.RevengeShots, attacker.RevengeActive)
+	}
+}
+
 func TestKnifeAttackDoesNotRequireAmmo(t *testing.T) {
 	r := &Room{World: &World{}, history: make(map[uint16]*poseHistory)}
 	attacker := &Player{PlayerState: PlayerState{Id: 1, Alive: true, IsBot: true, HP: MaxHP, Pos: Vec3{}}}
@@ -372,13 +533,13 @@ func TestSnapshotOrdersNearbyPlayersFirst(t *testing.T) {
 	for i, p := range players {
 		states[i] = quantizeState(&p.PlayerState, 0)
 	}
-	snap := recv.BuildSnapshot(0, players, states)
+	snap := recv.BuildSnapshot(0, players, states, time.Unix(0, 0))
 	if snap[7] != 3 {
 		t.Fatalf("expected 3 players, got %d", snap[7])
 	}
 	id0 := binary.LittleEndian.Uint16(snap[8:])
-	id1 := binary.LittleEndian.Uint16(snap[8+23:])
-	id2 := binary.LittleEndian.Uint16(snap[8+46:])
+	id1 := binary.LittleEndian.Uint16(snap[8+24:])
+	id2 := binary.LittleEndian.Uint16(snap[8+48:])
 	if id0 != 5 || id1 != 2 || id2 != 1 {
 		t.Fatalf("snapshot order = %d,%d,%d want self,near,far", id0, id1, id2)
 	}
@@ -430,10 +591,10 @@ func TestDeltaSnapshotIsSmallerThanKeyframe(t *testing.T) {
 	other.ApplyLoadout(4, 0)
 	players := []*Player{receiver, other}
 	states := quantizePlayers(nil, players, now.UnixNano())
-	full := receiver.BuildSnapshot(0, players, states)
+	full := receiver.BuildSnapshot(0, players, states, now)
 	other.Pos.X += .1
 	states = quantizePlayers(states, players, now.UnixNano())
-	delta := receiver.BuildSnapshot(2, players, states)
+	delta := receiver.BuildSnapshot(2, players, states, now)
 	if len(delta) >= len(full) || delta[7] == 0 {
 		t.Fatalf("full=%d delta=%d records=%d", len(full), len(delta), delta[7])
 	}
@@ -465,6 +626,21 @@ func TestBestSpawnNeverReturnsUnscoredOrigin(t *testing.T) {
 	}
 	if got := r.BestSpawn(&PlayerState{}); got == (Vec3{}) {
 		t.Fatal("crowded spawn selection returned unscored origin")
+	}
+}
+
+func TestEveryGunRewardsCrouchingAndPenalizesMovement(t *testing.T) {
+	for _, def := range Weapons {
+		if !isGun(def.Id) {
+			continue
+		}
+		aiming := isSniper(def.Id)
+		crouched := weaponSpread(def, 0, 0, true, true, false, aiming, 0)
+		standing := weaponSpread(def, 0, 0, true, false, false, aiming, 0)
+		moving := weaponSpread(def, 3, 0, true, false, false, aiming, 0)
+		if !(crouched < standing && standing < moving) {
+			t.Fatalf("%s spread crouched=%v standing=%v moving=%v", def.Name, crouched, standing, moving)
+		}
 	}
 }
 
@@ -555,6 +731,63 @@ func TestEventsNeverSplitsUTF8Rune(t *testing.T) {
 	}
 	if !strings.HasPrefix(name, got) || len(got)%3 != 0 {
 		t.Fatalf("bad truncation: %q", got)
+	}
+}
+
+func TestBondAvengeSurvivesRespawnAndScoresOnce(t *testing.T) {
+	now := time.Unix(100, 0)
+	attacker := &Player{PlayerState: PlayerState{Id: 1, IsBot: true, Alive: true, BondMate: 2}}
+	mate := &Player{PlayerState: PlayerState{Id: 2, IsBot: true, BondMate: 1, LastKiller: 3, KilledAt: now, Pos: Vec3{X: 100}}}
+	killer := &Player{PlayerState: PlayerState{Id: 3, IsBot: true, Alive: true, HP: 1}}
+	r := &Room{World: &World{Spawns: [][3]float64{{100, 0, 0}}}, Players: []*Player{attacker, mate, killer}, history: make(map[uint16]*poseHistory)}
+	r.Respawn(&mate.PlayerState, now.Add(RespawnDelayS))
+	if mate.LastKiller != killer.Id {
+		t.Fatal("respawn cleared the active revenge target")
+	}
+	r.pending = nil
+	r.Damage(&attacker.PlayerState, &killer.PlayerState, 10, false, 3, now.Add(4*time.Second))
+	if attacker.BondScore != 1 || mate.LastKiller != 0 {
+		t.Fatalf("revenge score=%d last killer=%d", attacker.BondScore, mate.LastKiller)
+	}
+	bondEvents := 0
+	for _, e := range r.pending {
+		if e.Type == EvBondEvent {
+			bondEvents++
+			if e.Kind != 1 || e.Dmg != 1 {
+				t.Fatalf("bad revenge event: %#v", e)
+			}
+		}
+	}
+	if bondEvents != 1 {
+		t.Fatalf("revenge emitted %d bond events", bondEvents)
+	}
+
+	r.pending = nil
+	killer.Alive, killer.HP = true, 1
+	r.Damage(&attacker.PlayerState, &killer.PlayerState, 10, false, 3, now.Add(5*time.Second))
+	for _, e := range r.pending {
+		if e.Type == EvBondEvent {
+			t.Fatalf("same death rewarded twice: %#v", e)
+		}
+	}
+}
+
+func TestKillingBondMateIsNotCover(t *testing.T) {
+	attacker := &Player{PlayerState: PlayerState{Id: 1, IsBot: true, Alive: true, BondMate: 2}}
+	mate := &Player{PlayerState: PlayerState{Id: 2, IsBot: true, Alive: true, HP: 1, BondMate: 1}}
+	r := &Room{Players: []*Player{attacker, mate}, history: make(map[uint16]*poseHistory)}
+	r.Damage(&attacker.PlayerState, &mate.PlayerState, 10, false, 3, time.Unix(1, 0))
+	for _, e := range r.pending {
+		if e.Type == EvBondEvent {
+			t.Fatalf("killing the bond mate emitted cover: %#v", e)
+		}
+	}
+}
+
+func TestBondEventEncoding(t *testing.T) {
+	b := Events([]Event{{Type: EvBondEvent, Player: 1, Victim: 2, Kind: 1, Dmg: 7, Name: "甲"}})
+	if len(b) != 13 || b[0] != OpEvents || b[1] != 1 || b[2] != EvBondEvent || binary.LittleEndian.Uint16(b[3:]) != 1 || binary.LittleEndian.Uint16(b[5:]) != 2 || b[7] != 1 || b[8] != 7 || b[9] != 3 || string(b[10:]) != "甲" {
+		t.Fatalf("bad bond event: %v", b)
 	}
 }
 

@@ -166,6 +166,33 @@ func TestIPBanPersistsAndRejectsWebSocketBeforeUpgrade(t *testing.T) {
 	}
 }
 
+func TestBotCountPersistsAcrossRestart(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "stats.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := NewHub(nil, store)
+	if bots, _ := hub.BotStatus(); bots != 8 {
+		t.Fatalf("default bots = %d, want 8", bots)
+	}
+	if bots, _, err := hub.SetBotCount(3); err != nil || bots != 3 {
+		t.Fatalf("set bots = %d, err = %v", bots, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err = NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if bots, _ := NewHub(nil, store).BotStatus(); bots != 3 {
+		t.Fatalf("restored bots = %d, want 3", bots)
+	}
+}
+
 func TestServeWSHonorsConfiguredOrigin(t *testing.T) {
 	hub := &Hub{Store: &Store{ipBans: make(map[string]IPBan)}}
 	request := httptest.NewRequest(http.MethodGet, "http://game.example/ws", nil)

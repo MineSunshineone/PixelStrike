@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
+const FORWARD = new THREE.Vector3(0, 0, 1);
 const MAX_PARTICLES = 512;
 const dummy = new THREE.Object3D();
 const pColor = new THREE.Color();
@@ -50,6 +51,8 @@ export class ParticleSystem {
   private instancedMesh: THREE.InstancedMesh;
   private grenades: GrenadeVisual[] = [];
   private blasts: BlastVisual[] = [];
+  private bulletHoleMesh: THREE.InstancedMesh;
+  private bulletHoleCursor = 0;
   private blastGeo = new THREE.SphereGeometry(0.5, 12, 8);
   private grenadeGeo = (() => {
     const body = new THREE.CylinderGeometry(0.075, 0.075, 0.18, 12);
@@ -66,7 +69,15 @@ export class ParticleSystem {
     this.instancedMesh = new THREE.InstancedMesh(this.geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), MAX_PARTICLES);
     this.instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.instancedMesh.count = 0;
-    this.group.add(this.instancedMesh);
+    this.bulletHoleMesh = new THREE.InstancedMesh(
+      new THREE.CircleGeometry(0.055, 8),
+      new THREE.MeshBasicMaterial({ color: 0x17120f, polygonOffset: true, polygonOffsetFactor: -2 }),
+      128,
+    );
+    this.bulletHoleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.bulletHoleMesh.frustumCulled = false;
+    this.bulletHoleMesh.count = 0;
+    this.group.add(this.instancedMesh, this.bulletHoleMesh);
     scene.add(this.group);
   }
 
@@ -113,6 +124,21 @@ export class ParticleSystem {
         gravity: 12,
       });
     }
+  }
+  spawnBulletHole(pos: THREE.Vector3, normal: THREE.Vector3) {
+    const slot = this.bulletHoleCursor++ % 128;
+    dummy.position.copy(pos).addScaledVector(normal, 0.006);
+    dummy.quaternion.setFromUnitVectors(FORWARD, normal);
+    dummy.rotateZ(Math.random() * Math.PI * 2);
+    dummy.scale.setScalar(0.75 + Math.random() * 0.5);
+    dummy.updateMatrix();
+    this.bulletHoleMesh.setMatrixAt(slot, dummy.matrix);
+    this.bulletHoleMesh.count = Math.min(this.bulletHoleCursor, 128);
+    this.bulletHoleMesh.instanceMatrix.needsUpdate = true;
+  }
+  clearBulletHoles() {
+    this.bulletHoleCursor = 0;
+    this.bulletHoleMesh.count = 0;
   }
   spawnDeath(pos: THREE.Vector3, headshot = false) {
     const count = Math.min(headshot ? 42 : 30, MAX_PARTICLES - this.particles.length);

@@ -112,6 +112,7 @@ interface RemoteModel {
   bodyColor: number;
   skin: number;
   gunColor: number;
+  opacity: number;
   visible: boolean;
 }
 
@@ -390,6 +391,7 @@ export class RemotePlayers {
         bodyColor: -1,
         skin: -1,
         gunColor: -1,
+        opacity: 1,
         visible: false,
       };
       this.models.set(state.id, model);
@@ -441,6 +443,11 @@ export class RemotePlayers {
         continue;
       }
       model.visible = true;
+      const transparent = state.ultimate === 3;
+      const wantedOpacity = transparent ? 0.14 : 1;
+      if (model.opacity !== wantedOpacity) {
+        model.opacity = wantedOpacity;
+      }
 
       const age = Math.min(0.2, Math.max(0, (now - model.sampleAt) / 1000));
       const follow = 1 - Math.exp(-dt * (age < 0.08 ? 20 : 11));
@@ -497,6 +504,16 @@ export class RemotePlayers {
 
       // Left Leg (Swings opposite)
       this.place(this.legL, model.index, model, sin, cos, -0.12, hipY, 0, -swing, 0, 0);
+      const wantedBodyTint = model.opacity === 1
+        ? (now < model.flashUntil ? 0xf43f5e : state.state & 2 ? 0xb89a61 : 0xffffff)
+        : model.opacity;
+      const wantedGunTint = model.opacity === 1
+        ? (state.weaponSkin === 1
+          ? gunColor.setHex(WEAPONS[state.weapon]?.color ?? 0x222225).lerp(goldGunColor, 0.78).getHex()
+          : state.weaponSkin === 2
+            ? gunColor.setHex(WEAPONS[state.weapon]?.color ?? 0x222225).lerp(diamondGunColor, 0.7).getHex()
+            : (WEAPONS[state.weapon]?.color ?? 0x222225))
+        : model.opacity;
       const wantedSkin = state.skin % SKIN_COUNT;
       if (wantedSkin !== model.skin) {
         model.skin = wantedSkin;
@@ -506,22 +523,18 @@ export class RemotePlayers {
           skinIndex.needsUpdate = true;
         }
       }
-      const wantedBodyColor = now < model.flashUntil ? 0xf43f5e : state.state & 2 ? 0xb89a61 : 0xffffff;
-      if (wantedBodyColor !== model.bodyColor) {
-        model.bodyColor = wantedBodyColor;
-        bodyColor.setHex(wantedBodyColor);
+      if (wantedBodyTint !== model.bodyColor) {
+        model.bodyColor = wantedBodyTint;
+        if (model.opacity === 1) bodyColor.setHex(wantedBodyTint);
+        else bodyColor.setScalar(wantedBodyTint);
         for (const layer of this.skinLayers) layer.setColorAt(model.index, bodyColor);
         uniformColorsDirty = true;
       }
-      const baseGunColor = WEAPONS[state.weapon]?.color ?? 0x222225;
-      const wantedGunColor = state.weaponSkin === 1
-        ? gunColor.setHex(baseGunColor).lerp(goldGunColor, 0.78).getHex()
-        : state.weaponSkin === 2
-          ? gunColor.setHex(baseGunColor).lerp(diamondGunColor, 0.7).getHex()
-          : baseGunColor;
-      if (wantedGunColor !== model.gunColor) {
-        model.gunColor = wantedGunColor;
-        this.gun.setColorAt(model.index, gunColor.setHex(wantedGunColor));
+      if (wantedGunTint !== model.gunColor) {
+        model.gunColor = wantedGunTint;
+        if (model.opacity === 1) gunColor.setHex(wantedGunTint);
+        else gunColor.setScalar(wantedGunTint);
+        this.gun.setColorAt(model.index, gunColor);
         gunColorsDirty = true;
       }
     }
@@ -539,7 +552,7 @@ export class RemotePlayers {
     camera.getWorldDirection(this.viewDir);
     let count = 0;
     for (const model of this.models.values()) {
-      if (!model.visible) continue;
+      if (!model.visible || model.state.ultimate === 3) continue;
       const dx = model.position.x - camera.position.x;
       const dy = model.position.y + 1.75 - camera.position.y;
       const dz = model.position.z - camera.position.z;

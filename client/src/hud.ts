@@ -1,4 +1,4 @@
-import { WEAPONS, type MapData, type PlayerSnap, type RosterEntry } from './constants.js';
+import { ULTIMATE_REQUIREMENT, ULTIMATES, WEAPONS, type MapData, type PlayerSnap, type RosterEntry } from './constants.js';
 import { CharacterPreview } from './preview.js';
 
 function el(id: string): HTMLElement {
@@ -64,14 +64,24 @@ export class Hud {
   root = el('hud');
   sensitivity = 0.00216;
   adsSensitivity = 0.85;
+  touchSensitivity = 0.0035;
   volume = 0.8;
   hipFov = 62;
   bobScale = 0.55;
   quality: 'low' | 'medium' | 'high' = 'medium';
+  crosshairStyle: string = 'cross-dot';
+  crosshairColor: string = '';
+  crosshairSize = 7;
+  crosshairThickness = 2;
+  crosshairGap = 3;
+  crosshairDot = true;
+  crosshairOutline = true;
+  crosshairDynamic = true;
   private loadoutPrimary = -1;
   private loadoutSecondary = -1;
   characterPreview: CharacterPreview | null = null;
   onJoin: ((name: string, primary: number, secondary: number, skin: number, primaryWeaponSkin: number, secondaryWeaponSkin: number) => void) | null = null;
+  onPractice: (() => void) | null = null;
   onVolumeChange: ((v: number) => void) | null = null;
   onFovChange: ((fov: number) => void) | null = null;
   onQualityChange: ((q: 'low' | 'medium' | 'high') => void) | null = null;
@@ -110,15 +120,18 @@ export class Hud {
   private lastShield = false;
   private lastScope: boolean | null = null;
   private lastCrosshair = -1;
+  private lastDynamic = true;
   private lastDeathCountdown = -2;
   private lastReloading: boolean | null = null;
   private lastReloadPct = -1;
   private lastAmmo = '';
   private hurtTimer = 0;
   private toastTimer = 0;
-  private flightTimer = 0;
+  private announcementTimer = 0;
+  private ultimateTimer = 0; private pointTimer = 0;
   private reconnectTimer = 0;
   private refreshWeaponProgress: (() => void) | null = null;
+  ultimateSelectorOpen = false;
 
   constructor() {
     const primary = el('primary-select') as HTMLSelectElement;
@@ -147,7 +160,7 @@ export class Hud {
     };
     this.refreshWeaponProgress = loadWeaponProgress;
     loadWeaponProgress();
-    // Restore loadout only; every deployment requires an explicit name.
+    // Restore the last deployment choices.
     const savedPrimary = localStorage.getItem('pixel_strike_primary');
     if (savedPrimary && primary) {
       primary.value = savedPrimary;
@@ -160,6 +173,8 @@ export class Hud {
     } else if (secondary) {
       secondary.value = '-1';
     }
+    primaryWeaponSkin.value = localStorage.getItem('pixel_strike_primary_skin') ?? '3';
+    secondaryWeaponSkin.value = localStorage.getItem('pixel_strike_secondary_skin') ?? '3';
 
     const updateWeaponSpecs = (id: number) => {
       const tag = el('weapon-spec-tag');
@@ -209,6 +224,8 @@ export class Hud {
         this.characterPreview?.setWeapon(+secondary.value);
       }
     });
+    primaryWeaponSkin.addEventListener('change', () => localStorage.setItem('pixel_strike_primary_skin', primaryWeaponSkin.value));
+    secondaryWeaponSkin.addEventListener('change', () => localStorage.setItem('pixel_strike_secondary_skin', secondaryWeaponSkin.value));
 
     const previewCanvas = el('character-preview-canvas') as HTMLCanvasElement;
     if (previewCanvas) {
@@ -232,13 +249,14 @@ export class Hud {
     let deploying = false;
     const startDeploy = () => {
       if (deploying) return;
-      const enteredName = window.prompt('请输入玩家名字（最多 16 个字符）');
+      const enteredName = window.prompt('请输入玩家名字（最多 16 个字符）', localStorage.getItem('pixel_strike_name') ?? '');
       if (enteredName === null) return;
       const n = [...enteredName.trim()].slice(0, 16).join('');
       if (!n) {
         window.alert('玩家名字不能为空');
         return;
       }
+      localStorage.setItem('pixel_strike_name', n);
       this.loadoutPrimary = +primary.value;
       this.loadoutSecondary = +secondary.value;
 
@@ -273,18 +291,14 @@ export class Hud {
             clearInterval(timer);
             setTimeout(() => {
               deployOverlay.style.display = 'none';
-              this.menu.style.display = 'none';
-              this.characterPreview?.setVisible(false);
-              this.root.style.display = 'block';
+              this.enterGameUI();
               deploying = false;
               this.onJoin?.(n, this.loadoutPrimary, this.loadoutSecondary, this.characterPreview?.getSkin() ?? 0, +primaryWeaponSkin.value, +secondaryWeaponSkin.value);
             }, 140);
           }
         }, 32);
       } else {
-        this.menu.style.display = 'none';
-        this.characterPreview?.setVisible(false);
-        this.root.style.display = 'block';
+        this.enterGameUI();
         this.onJoin?.(n, this.loadoutPrimary, this.loadoutSecondary, this.characterPreview?.getSkin() ?? 0, +primaryWeaponSkin.value, +secondaryWeaponSkin.value);
       }
     };
@@ -292,11 +306,68 @@ export class Hud {
     el('join-btn').addEventListener('click', startDeploy);
 
     el('lb-refresh-btn')?.addEventListener('click', () => this.loadLeaderboard());
-
+    el('sb-close-btn')?.addEventListener('click', () => this.toggleScoreboard(false));
 
     this.setupSettings();
     this.loadLeaderboard();
   }
+
+  setUltimate(points: number, kind: number) {
+    const panel = el('ultimate-panel');
+    if (!panel) return;
+    panel.classList.toggle('ready', points >= ULTIMATE_REQUIREMENT);
+    panel.classList.toggle('active', kind !== 0);
+    el('ultimate-points').textContent = kind ? '' : `${points}/${ULTIMATE_REQUIREMENT}`;
+    el('ultimate-name').textContent = kind ? (ULTIMATES.find((u) => u.id === kind)?.name ?? '') : 'ULT';
+    const fill = el('ultimate-fill');
+    if (fill) fill.style.width = `${Math.min(100, points / ULTIMATE_REQUIREMENT * 100)}%`;
+  }
+
+  setBlackDream(active: boolean) {
+    const overlay = el('black-dream');
+    if (overlay) overlay.style.display = active ? 'block' : 'none';
+  }
+
+  toggleUltimateSelector(force?: boolean) {
+    const selector = el('ultimate-selector');
+    if (!selector) return;
+    this.ultimateSelectorOpen = force ?? !this.ultimateSelectorOpen;
+    selector.style.display = this.ultimateSelectorOpen ? 'flex' : 'none';
+  }
+
+  showKillPoint(points: number) {
+    const banner = el('kill-point-banner');
+    if (!banner) return;
+    banner.textContent = `⚡ 终极点数 ${points}/${ULTIMATE_REQUIREMENT}`;
+    banner.classList.remove('show');
+    void banner.offsetWidth;
+    banner.classList.add('show');
+    clearTimeout(this.pointTimer);
+    this.pointTimer = window.setTimeout(() => banner.classList.remove('show'), 2000);
+  }
+
+  showUltimateReady() {
+    const selector = el('ultimate-selector');
+    if (selector) selector.style.display = 'flex';
+  }
+
+  showUltimateAnnouncement(kind: number, playerName?: string) {
+    const ult = ULTIMATES.find((u) => u.id === kind);
+    if (!ult) return;
+    const banner = el('ultimate-announcement');
+    if (playerName) {
+      banner.textContent = `${playerName} 开启了 ${ult.name}`;
+    } else {
+      banner.textContent = ult.name;
+    }
+    banner.dataset.kind = String(kind);
+    banner.classList.remove('show');
+    void banner.offsetWidth;
+    banner.classList.add('show');
+    clearTimeout(this.ultimateTimer);
+    this.ultimateTimer = window.setTimeout(() => banner.classList.remove('show'), 2000);
+  }
+
 
   private setupSettings() {
     const sens = el('sens-slider') as HTMLInputElement;
@@ -305,6 +376,7 @@ export class Hud {
     const quality = el('quality-select') as HTMLSelectElement;
     const fov = el('fov-slider') as HTMLInputElement;
     const bob = el('bob-slider') as HTMLInputElement;
+    const touchSens = el('touch-sens-slider') as HTMLInputElement;
 
     const savedSens = localStorage.getItem('ps_sens');
     const savedAdsSens = localStorage.getItem('ps_ads_sens');
@@ -313,6 +385,7 @@ export class Hud {
     // v2 gives existing players the tighter default FOV once.
     const savedFov = localStorage.getItem('ps_hip_fov_v2');
     const savedBob = localStorage.getItem('ps_gun_bob');
+    const savedTouchSens = localStorage.getItem('ps_touch_sens');
 
     if (savedSens && sens) sens.value = savedSens;
     if (savedAdsSens && adsSens) adsSens.value = savedAdsSens;
@@ -320,9 +393,11 @@ export class Hud {
     if (savedQ && quality) quality.value = savedQ;
     if (savedFov && fov) fov.value = savedFov;
     if (savedBob && bob) bob.value = savedBob;
+    if (savedTouchSens && touchSens) touchSens.value = savedTouchSens;
 
     this.sensitivity = sens ? (+sens.value / 50) * 0.0024 : 0.00216;
     this.adsSensitivity = adsSens ? +adsSens.value / 100 : 0.85;
+    this.touchSensitivity = touchSens ? (+touchSens.value / 50) * 0.0035 : 0.0035;
     this.volume = vol ? +vol.value / 100 : 0.8;
     this.quality = quality ? (quality.value as typeof this.quality) : 'medium';
     this.hipFov = fov ? +fov.value : 62;
@@ -337,6 +412,11 @@ export class Hud {
       this.adsSensitivity = +adsSens.value / 100;
       localStorage.setItem('ps_ads_sens', adsSens.value);
     });
+    touchSens?.addEventListener('input', () => {
+      this.touchSensitivity = (+touchSens.value / 50) * 0.0035;
+      localStorage.setItem('ps_touch_sens', touchSens.value);
+    });
+
 
     vol?.addEventListener('input', () => {
       this.volume = +vol.value / 100;
@@ -361,15 +441,198 @@ export class Hud {
       localStorage.setItem('ps_gun_bob', bob.value);
     });
 
+    const chStyle = el('ch-style-select') as HTMLSelectElement;
+    const chColorInput = el('ch-color-input') as HTMLInputElement;
+    const chSize = el('ch-size-slider') as HTMLInputElement;
+    const chThick = el('ch-thick-slider') as HTMLInputElement;
+    const chGap = el('ch-gap-slider') as HTMLInputElement;
+    const chDot = el('ch-dot-toggle') as HTMLInputElement;
+    const chOutline = el('ch-outline-toggle') as HTMLInputElement;
+    const chDynamic = el('ch-dynamic-toggle') as HTMLInputElement;
+    const chReset = el('ch-reset-btn') as HTMLButtonElement;
+
+    this.crosshairStyle = localStorage.getItem('ps_ch_style') ?? 'cross-dot';
+    this.crosshairColor = localStorage.getItem('ps_ch_color') ?? '';
+    this.crosshairSize = +(localStorage.getItem('ps_ch_size') ?? '7');
+    this.crosshairThickness = +(localStorage.getItem('ps_ch_thick') ?? '2');
+    this.crosshairGap = +(localStorage.getItem('ps_ch_gap') ?? '3');
+    this.crosshairDot = (localStorage.getItem('ps_ch_dot') ?? '1') !== '0';
+    this.crosshairOutline = (localStorage.getItem('ps_ch_outline') ?? '1') !== '0';
+    this.crosshairDynamic = (localStorage.getItem('ps_ch_dynamic') ?? '1') !== '0';
+
+    if (chStyle) chStyle.value = this.crosshairStyle;
+    if (chColorInput) chColorInput.value = this.crosshairColor || '#f4f1e4';
+    if (chSize) chSize.value = String(this.crosshairSize);
+    if (chThick) chThick.value = String(this.crosshairThickness);
+    if (chGap) chGap.value = String(this.crosshairGap);
+    if (chDot) chDot.checked = this.crosshairDot;
+    if (chOutline) chOutline.checked = this.crosshairOutline;
+    if (chDynamic) chDynamic.checked = this.crosshairDynamic;
+    for (const s of document.querySelectorAll<HTMLButtonElement>('.ch-swatch')) {
+      s.classList.toggle('active', s.dataset.color === this.crosshairColor);
+    }
+
+    const saveCrosshair = () => {
+      localStorage.setItem('ps_ch_style', this.crosshairStyle);
+      localStorage.setItem('ps_ch_size', String(this.crosshairSize));
+      localStorage.setItem('ps_ch_thick', String(this.crosshairThickness));
+      localStorage.setItem('ps_ch_gap', String(this.crosshairGap));
+      localStorage.setItem('ps_ch_dot', this.crosshairDot ? '1' : '0');
+      localStorage.setItem('ps_ch_outline', this.crosshairOutline ? '1' : '0');
+      localStorage.setItem('ps_ch_dynamic', this.crosshairDynamic ? '1' : '0');
+    };
+
+    chStyle?.addEventListener('change', () => {
+      this.crosshairStyle = chStyle.value;
+      saveCrosshair();
+      this.applyCrosshair();
+      this.updateCrosshairPreview();
+    });
+    chSize?.addEventListener('input', () => {
+      this.crosshairSize = +chSize.value;
+      saveCrosshair();
+      this.applyCrosshair();
+      this.updateCrosshairPreview();
+    });
+    chThick?.addEventListener('input', () => {
+      this.crosshairThickness = +chThick.value;
+      saveCrosshair();
+      this.applyCrosshair();
+      this.updateCrosshairPreview();
+    });
+    chGap?.addEventListener('input', () => {
+      this.crosshairGap = +chGap.value;
+      saveCrosshair();
+      this.applyCrosshair();
+      this.updateCrosshairPreview();
+    });
+    chDot?.addEventListener('change', () => {
+      this.crosshairDot = chDot.checked;
+      saveCrosshair();
+      this.applyCrosshair();
+      this.updateCrosshairPreview();
+    });
+    chOutline?.addEventListener('change', () => {
+      this.crosshairOutline = chOutline.checked;
+      saveCrosshair();
+      this.applyCrosshair();
+      this.updateCrosshairPreview();
+    });
+    chDynamic?.addEventListener('change', () => {
+      this.crosshairDynamic = chDynamic.checked;
+      saveCrosshair();
+      this.applyCrosshair();
+      this.updateCrosshairPreview();
+    });
+    for (const s of document.querySelectorAll<HTMLButtonElement>('.ch-swatch')) {
+      s.addEventListener('click', () => this.setCrosshairColor(s.dataset.color ?? ''));
+    }
+    chColorInput?.addEventListener('input', () => this.setCrosshairColor(chColorInput.value));
+    chReset?.addEventListener('click', () => this.resetCrosshair());
+
+    this.applyCrosshair();
+    this.updateCrosshairPreview();
+
     el('open-settings-btn')?.addEventListener('click', () => this.toggleSettings(true));
     el('close-settings-btn')?.addEventListener('click', () => this.toggleSettings(false));
     el('exit-btn')?.addEventListener('click', () => this.onExit?.());
+    el('practice-btn')?.addEventListener('click', () => this.startPractice());
+    el('practice-join-btn')?.addEventListener('click', () => this.startPractice());
     el('pause-resume-btn')?.addEventListener('click', () => this.showPause(false));
     el('pause-flight-btn')?.addEventListener('click', () => this.onFlightToggle?.());
     el('pause-exit-btn')?.addEventListener('click', () => this.onExit?.());
   }
 
+  applyCrosshair() {
+    this.crosshair.dataset.style = this.crosshairStyle;
+    this.crosshair.dataset.outline = this.crosshairOutline ? 'on' : 'off';
+    this.crosshair.dataset.dot = this.crosshairDot ? 'on' : 'off';
+    this.crosshair.dataset.customColor = this.crosshairColor ? 'on' : 'off';
+    if (this.crosshairColor) this.crosshair.style.setProperty('--crosshair-color', this.crosshairColor);
+    else this.crosshair.style.removeProperty('--crosshair-color');
+    this.crosshair.style.setProperty('--ch-size', `${this.crosshairSize}px`);
+    this.crosshair.style.setProperty('--ch-thickness', `${this.crosshairThickness}px`);
+    this.crosshair.style.setProperty('--ch-dot', `${this.crosshairThickness}px`);
+    this.setCrosshair(this.lastCrosshair);
+  }
 
+  updateCrosshairPreview() {
+    const preview = document.getElementById('crosshair-preview');
+    if (!preview) return;
+    preview.dataset.style = this.crosshairStyle;
+    preview.dataset.outline = this.crosshairOutline ? 'on' : 'off';
+    preview.dataset.dot = this.crosshairDot ? 'on' : 'off';
+    preview.dataset.customColor = this.crosshairColor ? 'on' : 'off';
+    if (this.crosshairColor) preview.style.setProperty('--crosshair-color', this.crosshairColor);
+    else preview.style.removeProperty('--crosshair-color');
+    preview.style.setProperty('--ch-size', `${this.crosshairSize}px`);
+    preview.style.setProperty('--ch-thickness', `${this.crosshairThickness}px`);
+    preview.style.setProperty('--ch-dot', `${this.crosshairThickness}px`);
+    preview.style.setProperty('--spread', `${this.crosshairGap}px`);
+  }
+
+  private setCrosshairColor(color: string) {
+    this.crosshairColor = color;
+    localStorage.setItem('ps_ch_color', color);
+    const input = el('ch-color-input') as HTMLInputElement | null;
+    if (input) input.value = color || '#f4f1e4';
+    for (const s of document.querySelectorAll<HTMLButtonElement>('.ch-swatch')) {
+      s.classList.toggle('active', s.dataset.color === color);
+    }
+    this.applyCrosshair();
+    this.updateCrosshairPreview();
+  }
+
+  resetCrosshair() {
+    this.crosshairStyle = 'cross-dot';
+    this.crosshairColor = '';
+    this.crosshairSize = 7;
+    this.crosshairThickness = 2;
+    this.crosshairGap = 3;
+    this.crosshairDot = true;
+    this.crosshairOutline = true;
+    this.crosshairDynamic = true;
+    for (const key of ['style', 'color', 'size', 'thick', 'gap', 'dot', 'outline', 'dynamic']) {
+      localStorage.removeItem(`ps_ch_${key}`);
+    }
+    const style = el('ch-style-select') as HTMLSelectElement;
+    if (style) style.value = this.crosshairStyle;
+    const size = el('ch-size-slider') as HTMLInputElement;
+    if (size) size.value = String(this.crosshairSize);
+    const thick = el('ch-thick-slider') as HTMLInputElement;
+    if (thick) thick.value = String(this.crosshairThickness);
+    const gap = el('ch-gap-slider') as HTMLInputElement;
+    if (gap) gap.value = String(this.crosshairGap);
+    const dot = el('ch-dot-toggle') as HTMLInputElement;
+    if (dot) dot.checked = true;
+    const outline = el('ch-outline-toggle') as HTMLInputElement;
+    if (outline) outline.checked = true;
+    const dyn = el('ch-dynamic-toggle') as HTMLInputElement;
+    if (dyn) dyn.checked = true;
+    this.setCrosshairColor('');
+  }
+
+  private enterGameUI() {
+    this.menu.style.display = 'none';
+    this.characterPreview?.setVisible(false);
+    this.root.style.display = 'block';
+  }
+
+  startPractice() {
+    this.toggleSettings(false);
+    this.enterGameUI();
+    this.onPractice?.();
+  }
+
+  setPractice() {
+    const strip = el('match-strip');
+    const middle = strip?.children[1];
+    if (middle) middle.textContent = '模拟练习 · PRACTICE';
+    const shield = el('shield-badge');
+    if (shield) shield.style.display = 'none';
+    const netStats = el('net-stats');
+    if (netStats) netStats.style.display = 'none';
+  }
 
   setMap(map: MapData) {
     this.map = map;
@@ -621,11 +884,14 @@ export class Hud {
   }
 
   setCrosshair(spread: number) {
-    const px = Math.round(Math.max(2, Math.min(32, spread)));
-    if (px === this.lastCrosshair) return;
+    const dynamic = this.crosshairDynamic;
+    const gap = this.crosshairGap;
+    const px = dynamic ? Math.max(gap, Math.min(32, Math.round(spread))) : gap;
+    if (px === this.lastCrosshair && dynamic === this.lastDynamic) return;
     this.lastCrosshair = px;
+    this.lastDynamic = dynamic;
     this.crosshair.style.setProperty('--spread', `${px}px`);
-    this.crosshair.dataset.accuracy = px < 7 ? 'tight' : px < 14 ? 'warm' : 'wide';
+    this.crosshair.dataset.accuracy = dynamic ? (px < 7 ? 'tight' : px < 14 ? 'warm' : 'wide') : 'fixed';
   }
 
 
@@ -682,11 +948,39 @@ export class Hud {
   showFlightAnnouncement(name: string) {
     const banner = el('flight-announcement');
     banner.textContent = `${name || '特战队员'} 能飞`;
-    banner.classList.remove('show');
+    banner.classList.remove('revenge', 'bond', 'show');
     void banner.offsetWidth;
     banner.classList.add('show');
-    clearTimeout(this.flightTimer);
-    this.flightTimer = window.setTimeout(() => banner.classList.remove('show'), 2600);
+    clearTimeout(this.announcementTimer);
+    this.announcementTimer = window.setTimeout(() => banner.classList.remove('show'), 2600);
+  }
+
+  showRevengeAnnouncement(name: string) {
+    const banner = el('flight-announcement');
+    banner.textContent = `（${name || '玩家'}）来复仇了！`;
+    banner.classList.remove('bond', 'show');
+    banner.classList.add('revenge');
+    void banner.offsetWidth;
+    banner.classList.add('show');
+    clearTimeout(this.announcementTimer);
+    this.announcementTimer = window.setTimeout(() => banner.classList.remove('show', 'revenge'), 4000);
+  }
+
+  showBondEvent(kind: number, name: string, score: number) {
+    const banner = el('flight-announcement');
+    const actor = name || (kind === 3 ? '特战队员' : '羁绊者');
+    switch (kind) {
+      case 1: banner.textContent = `🔥 ${actor} 为TA报仇了 · 羁绊值 ${score}`; break;
+      case 2: banner.textContent = `⚡ ${actor} 心有灵犀 · 羁绊值 ${score}`; break;
+      case 3: banner.textContent = `💘 ${actor} 缔结战场羁绊`; break;
+      default: banner.textContent = `💕 ${actor} 守护了TA · 羁绊值 ${score}`;
+    }
+    banner.classList.remove('revenge', 'show');
+    banner.classList.add('bond');
+    void banner.offsetWidth;
+    banner.classList.add('show');
+    clearTimeout(this.announcementTimer);
+    this.announcementTimer = window.setTimeout(() => banner.classList.remove('show', 'bond'), 3200);
   }
 
 
@@ -738,6 +1032,10 @@ export class Hud {
 
   isSettingsOpen(): boolean {
     return this.settings?.style.display === 'flex';
+  }
+
+  isPaused(): boolean {
+    return this.pause?.style.display === 'flex';
   }
 
   showPause(v: boolean) {
@@ -793,6 +1091,13 @@ export class Hud {
     if (this.pause) this.pause.style.display = 'none';
     if (this.settings) this.settings.style.display = 'none';
     if (this.scoreboard) this.scoreboard.style.display = 'none';
+    const strip = el('match-strip');
+    const middle = strip?.children[1];
+    if (middle) middle.textContent = '黄昏要塞';
+    const shield = el('shield-badge');
+    if (shield) shield.style.display = '';
+    const netStats = el('net-stats');
+    if (netStats) netStats.style.display = '';
     this.loadLeaderboard();
     this.refreshWeaponProgress?.();
   }

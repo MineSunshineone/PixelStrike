@@ -43,9 +43,9 @@ var Weapons = []WeaponDef{
 	{12, "XM1014", 17, 1.2, 200, 1.85, 2.4, .10, .96, .70, 7, 32, 2100, true, 8},
 }
 
-func isGun(id uint8) bool      { return int(id) < len(Weapons) && id != 6 }
-func isSniper(id uint8) bool   { return id == 5 || id == 11 }
-func isShotgun(id uint8) bool  { return id == 12 }
+func isGun(id uint8) bool     { return int(id) < len(Weapons) && id != 6 }
+func isSniper(id uint8) bool  { return id == 5 || id == 11 }
+func isShotgun(id uint8) bool { return id == 12 }
 func isPrimary(id uint8) bool {
 	switch id {
 	case 2, 3, 4, 5, 8, 9, 10, 11, 12:
@@ -58,26 +58,40 @@ func isSecondary(id uint8) bool { return id == 0 || id == 1 || id == 7 }
 const WeaponHE uint8 = 13
 
 const (
-	TickRate        = 60
-	TickDT          = 1.0 / TickRate
-	WalkSpeed       = 6.4
-	GroundAccel     = 44.0
-	StopAccel       = 60.0
-	AirAccel        = 9.5
-	CrouchSpeed     = .6
-	Gravity         = -22.0
-	JumpVel         = 8.4
-	MaxRewindTicks  = 8
-	MaxHP           = 100
-	SpawnProtectS   = 2 * time.Second
-	AWPScopeTime    = 320 * time.Millisecond
-	RespawnDelayS   = 3 * time.Second
-	EyeHeight       = 1.7
-	CrouchEyeH      = 1.12
-	StandingHeight  = 2.1
-	CrouchingHeight = 1.3
-	FlightSpeed     = WalkSpeed
-	MaxFlightHeight = StandingHeight * 25
+	TickRate                    = 60
+	TickDT                      = 1.0 / TickRate
+	WalkSpeed                   = 6.4
+	GroundAccel                 = 44.0
+	StopAccel                   = 60.0
+	AirAccel                    = 9.5
+	CrouchSpeed                 = .6
+	Gravity                     = -22.0
+	JumpVel                     = 8.4
+	MaxRewindTicks              = 8
+	MaxHP                       = 100
+	SpawnProtectS               = 2 * time.Second
+	AWPScopeTime                = 320 * time.Millisecond
+	RespawnDelayS               = 3 * time.Second
+	EyeHeight                   = 1.7
+	CrouchEyeH                  = 1.12
+	StandingHeight              = 2.1
+	CrouchingHeight             = 1.3
+	FlightSpeed                 = WalkSpeed
+	MaxFlightHeight             = StandingHeight * 25
+	RevengeDeathThreshold uint8 = 10
+	BondCoverRange              = 20.0
+	BondAvengeWindow            = 30 * time.Second
+
+	UltimateRequirement = 7
+	UltimateBlackDream  = 1
+	UltimateInvincible  = 2
+	UltimateGhost       = 3
+
+	UltimateBlackDreamS = 10 * time.Second
+	UltimateInvincibleS = 15 * time.Second
+	UltimateGhostS      = 10 * time.Second
+
+	GhostSpeedMultiplier = 1.45
 )
 
 type PlayerState struct {
@@ -97,7 +111,16 @@ type PlayerState struct {
 	LandingUntil, AimStarted, SpeedUntil, DmgUntil, RecoilUntil    time.Time
 	Streak                                                         uint8
 	Grenades                                                       int
+	UltimatePoints, Ultimate                                       uint8
+	BlackDreamUntil, InvincibleUntilUlt, GhostUntil                time.Time
 	Kills, Deaths                                                  uint16
+	NoKillDeaths                                                   uint8
+	RevengeReady, RevengeActive                                    bool
+	RevengeShots                                                   uint8
+	BondMate                                                       uint16
+	BondScore                                                      uint8
+	LastKiller                                                     uint16
+	KilledAt                                                       time.Time
 	LastInputSeq, LastShotSeq                                      uint16
 	HasShot                                                        bool
 	LastShotAt                                                     time.Time
@@ -106,8 +129,36 @@ type PlayerState struct {
 	inputCount                                                     int
 }
 
+func (p *PlayerState) addBondScore() uint8 {
+	if p.BondScore < 255 {
+		p.BondScore++
+	}
+	return p.BondScore
+}
+
 func (p *PlayerState) ProtectedAt(now time.Time) bool {
 	return p.Alive && now.Before(p.InvincibleUntil)
+}
+
+func (p *PlayerState) BlackDreamAt(now time.Time) bool {
+	return p.Alive && now.Before(p.BlackDreamUntil)
+}
+
+func (p *PlayerState) UltimateInvincibleAt(now time.Time) bool {
+	return p.Alive && now.Before(p.InvincibleUntilUlt)
+}
+
+func (p *PlayerState) GhostAt(now time.Time) bool {
+	return p.Alive && now.Before(p.GhostUntil)
+}
+
+func (r *Room) AnyBlackDream(now time.Time) bool {
+	for _, other := range r.Players {
+		if (&other.PlayerState).BlackDreamAt(now) {
+			return true
+		}
+	}
+	return false
 }
 func (p *PlayerState) Height() float64 {
 	if p.Crouch {
@@ -187,6 +238,27 @@ func (r *Room) Step(now time.Time) {
 	r.StepGrenades(now)
 	for _, pl := range r.Players {
 		p := &pl.PlayerState
+		if p.Ultimate != 0 {
+			switch p.Ultimate {
+			case UltimateBlackDream:
+				if !p.BlackDreamAt(now) {
+					p.Ultimate = 0
+					r.Emit(Event{Type: EvUltimate, Player: p.Id, Kind: UltimateBlackDream})
+				}
+			case UltimateInvincible:
+				if !p.UltimateInvincibleAt(now) {
+					p.Ultimate = 0
+					r.Emit(Event{Type: EvUltimate, Player: p.Id, Kind: UltimateInvincible})
+				}
+			case UltimateGhost:
+				if !p.GhostAt(now) {
+					p.Ultimate = 0
+					r.Emit(Event{Type: EvUltimate, Player: p.Id, Kind: UltimateGhost})
+				}
+			default:
+				p.Ultimate = 0
+			}
+		}
 		if !p.Alive {
 			if !p.RespawnAt.IsZero() && !now.Before(p.RespawnAt) {
 				r.Respawn(p, now)
@@ -236,6 +308,9 @@ func (r *Room) Move(p *PlayerState, now time.Time) {
 		p.Crouch = false
 	}
 	speed := WalkSpeed * Weapons[min(int(p.Weapon), len(Weapons)-1)].SpeedMult
+	if p.GhostAt(now) {
+		speed *= GhostSpeedMultiplier
+	}
 	if now.Before(p.SpeedUntil) {
 		speed *= p.streakSpeedMul()
 	}
@@ -305,6 +380,9 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 	if !p.Alive || p.Reloading || now.Before(p.NextFire) || !finite(yaw) || !finite(pitch) {
 		return false
 	}
+	if p.IsBot && r.AnyBlackDream(now) {
+		return false
+	}
 	yaw = math.Remainder(yaw, 2*math.Pi)
 	pitch = math.Max(-1.55, math.Min(1.55, pitch))
 	if p.HasShot && shotSeq == p.LastShotSeq {
@@ -338,7 +416,9 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 	p.LastShotAt = now
 	p.ShotCounter++
 	if p.ProtectedAt(now) {
-		p.InvincibleUntil = time.Time{}
+		if !p.RevengeActive {
+			p.InvincibleUntil = time.Time{}
+		}
 	}
 
 	origin := Vec3{p.Pos.X, p.Pos.Y + EyeHeight, p.Pos.Z}
@@ -368,6 +448,23 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 	if r.tick-seenTick > MaxRewindTicks {
 		seenTick = r.tick - MaxRewindTicks
 	}
+	// Revenge is a fixed 10-bullet budget: every gunshot counts, with or without a
+	// lock. Invincibility can expire independently without ending the budget.
+	if p.RevengeActive && p.RevengeShots > 0 && isGun(uint8(weapon)) {
+		if target := r.revengeTarget(p, yaw, pitch, origin, seenTick, now); target != nil {
+			r.Damage(p, target, def.Dmg*def.HeadMult, true, uint8(weapon), now)
+			p.RevengeShots--
+			if p.RevengeShots == 0 {
+				p.RevengeActive = false
+			}
+			return true
+		}
+		p.RevengeShots--
+		if p.RevengeShots == 0 {
+			p.RevengeActive = false
+		}
+	}
+
 	pellets := 1
 	if isGun(uint8(weapon)) && def.Pellets > 1 {
 		pellets = def.Pellets
@@ -386,7 +483,7 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 		targetDist, hitY, hitHeight := maxDist, 0.0, StandingHeight
 		for _, other := range r.Players {
 			o := &other.PlayerState
-			if o == p || !o.Alive || o.ProtectedAt(now) {
+			if o == p || !o.Alive || o.ProtectedAt(now) || o.GhostAt(now) {
 				continue
 			}
 			pose := r.poseAt(o.Id, seenTick, o.Pos, o.Crouch)
@@ -433,8 +530,99 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 	return true
 }
 
+func (r *Room) revengeTarget(attacker *PlayerState, yaw, pitch float64, origin Vec3, seenTick uint32, now time.Time) *PlayerState {
+	var best *PlayerState
+	bestScore := math.MaxFloat64
+	forward, right, up := viewAxes(yaw, pitch)
+	// Cover a full on-screen rectangle (75° vertical, 21:9 horizontal) so any
+	// enemy in view locks, not only someone near the crosshair.
+	tanV := math.Tan(37.5 * math.Pi / 180)
+	tanH := tanV * 21 / 9
+	for _, other := range r.Players {
+		target := &other.PlayerState
+		if target == attacker || !target.Alive || target.ProtectedAt(now) {
+			continue
+		}
+		pose := r.poseAt(target.Id, seenTick, target.Pos, target.Crouch)
+		height := StandingHeight
+		if pose.Crouch {
+			height = CrouchingHeight
+		}
+		visible, centerDot, dist := r.revengeVisible(origin, forward, right, up, pose.Pos, height, tanH, tanV)
+		if !visible {
+			continue
+		}
+		score := (1-centerDot)*100 + dist*.001
+		if score < bestScore {
+			best, bestScore = target, score
+		}
+	}
+	return best
+}
+
+func viewAxes(yaw, pitch float64) (forward, right, up Vec3) {
+	forward = AimDir(yaw, pitch)
+	right = norm(Vec3{-forward.Z, 0, forward.X})
+	if right.X == 0 && right.Z == 0 {
+		right = Vec3{1, 0, 0}
+	}
+	up = Vec3{
+		right.Y*forward.Z - right.Z*forward.Y,
+		right.Z*forward.X - right.X*forward.Z,
+		right.X*forward.Y - right.Y*forward.X,
+	}
+	return
+}
+
+func inViewFrustum(origin, forward, right, up, point Vec3, tanH, tanV float64) (dot, dist float64, ok bool) {
+	to := Vec3{point.X - origin.X, point.Y - origin.Y, point.Z - origin.Z}
+	dist = math.Sqrt(to.X*to.X + to.Y*to.Y + to.Z*to.Z)
+	if dist <= 0.05 {
+		return 0, dist, false
+	}
+	z := to.X*forward.X + to.Y*forward.Y + to.Z*forward.Z
+	if z <= 0.05 {
+		return 0, dist, false
+	}
+	x := to.X*right.X + to.Y*right.Y + to.Z*right.Z
+	y := to.X*up.X + to.Y*up.Y + to.Z*up.Z
+	if math.Abs(x) > z*tanH || math.Abs(y) > z*tanV {
+		return 0, dist, false
+	}
+	return z / dist, dist, true
+}
+
+func (r *Room) revengeVisible(origin, forward, right, up, pos Vec3, height, tanH, tanV float64) (bool, float64, float64) {
+	points := []Vec3{
+		{pos.X, pos.Y + height - .12, pos.Z},
+		{pos.X, pos.Y + height*.55, pos.Z},
+		{pos.X, pos.Y + .2, pos.Z},
+		{pos.X + PlayerHalf, pos.Y + height*.55, pos.Z},
+		{pos.X - PlayerHalf, pos.Y + height*.55, pos.Z},
+		{pos.X, pos.Y + height*.55, pos.Z + PlayerHalf},
+		{pos.X, pos.Y + height*.55, pos.Z - PlayerHalf},
+	}
+	bestDot, bestDist := -1.0, math.MaxFloat64
+	any := false
+	for _, point := range points {
+		dot, dist, ok := inViewFrustum(origin, forward, right, up, point, tanH, tanV)
+		if !ok {
+			continue
+		}
+		line := norm(Vec3{point.X - origin.X, point.Y - origin.Y, point.Z - origin.Z})
+		if hit, distance := r.World.Raycast(origin, line, dist); hit && distance < dist-.05 {
+			continue
+		}
+		any = true
+		if dot > bestDot {
+			bestDot, bestDist = dot, dist
+		}
+	}
+	return any, bestDot, bestDist
+}
+
 func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool, weapon uint8, now time.Time) {
-	if !victim.Alive || victim.ProtectedAt(now) {
+	if !victim.Alive || victim.ProtectedAt(now) || victim.UltimateInvincibleAt(now) {
 		return
 	}
 	if now.Before(attacker.DmgUntil) {
@@ -461,6 +649,19 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	r.Emit(Event{Type: EvKill, Killer: attacker.Id, Victim: victim.Id, Weapon: weapon, Headshot: hs})
 	attacker.Kills++
 	victim.Deaths++
+	// A kill breaks the attacker's consecutive zero-kill/death streak.
+	attacker.NoKillDeaths = 0
+	if !victim.IsBot {
+		victim.NoKillDeaths++
+		if victim.NoKillDeaths >= RevengeDeathThreshold {
+			// Consume the accumulated consecutive deaths when arming revenge.
+			victim.RevengeReady = true
+			victim.NoKillDeaths = 0
+		}
+	}
+	if !attacker.IsBot && attacker.Id != victim.Id && attacker.Ultimate == 0 && attacker.UltimatePoints < UltimateRequirement {
+		attacker.UltimatePoints++
+	}
 	if attacker.Id != victim.Id {
 		if attacker.Streak < 255 {
 			attacker.Streak++
@@ -468,6 +669,8 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 		r.applyStreakReward(attacker, now)
 	}
 	victim.Streak = 0
+	victim.UltimatePoints, victim.Ultimate = 0, 0
+	victim.BlackDreamUntil, victim.InvincibleUntilUlt, victim.GhostUntil = time.Time{}, time.Time{}, time.Time{}
 	victim.DmgUntil, victim.RecoilUntil, victim.SpeedUntil = time.Time{}, time.Time{}, time.Time{}
 	if !attacker.IsBot {
 		r.Store.Accumulate(attacker.Account, 1, 0)
@@ -478,7 +681,34 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	if !victim.IsBot {
 		r.Store.Accumulate(victim.Account, 0, 1)
 	}
+	victim.LastKiller = attacker.Id
+	victim.KilledAt = now
+
+	// A kill can trigger at most one bond event; revenge takes priority over cover and resonance.
+	if attacker.BondMate != 0 && attacker.BondMate != attacker.Id {
+		if mate := r.findPlayer(attacker.BondMate); mate != nil {
+			kind := uint8(255)
+			if mate.LastKiller == victim.Id && !mate.KilledAt.IsZero() && now.Sub(mate.KilledAt) < BondAvengeWindow {
+				kind = 1
+				mate.LastKiller, mate.KilledAt = 0, time.Time{}
+			} else if mate.Id != victim.Id && mate.Alive {
+				dx := attacker.Pos.X - mate.Pos.X
+				dz := attacker.Pos.Z - mate.Pos.Z
+				if dx*dx+dz*dz <= BondCoverRange*BondCoverRange {
+					kind = 0
+				} else if attacker.Streak >= 2 && mate.Streak >= 2 {
+					kind = 2
+				}
+			}
+			if kind != 255 {
+				r.Emit(Event{Type: EvBondEvent, Player: attacker.Id, Victim: mate.Id, Kind: kind, Dmg: attacker.addBondScore(), Name: attacker.Name})
+			}
+		}
+	}
+
 	victim.Alive, victim.Reloading = false, false
+	victim.RevengeActive, victim.RevengeShots = false, 0
+	victim.InvincibleUntil = time.Time{}
 	victim.RespawnAt = now.Add(RespawnDelayS)
 }
 
@@ -654,6 +884,31 @@ func (r *Room) applyStreakReward(p *PlayerState, now time.Time) {
 	r.Emit(Event{Type: EvStreakBuff, Player: p.Id, Kind: kind, Dmg: p.Streak, Ms: ms})
 }
 
+func (r *Room) CastUltimate(p *PlayerState, kind uint8, now time.Time) bool {
+	if !p.Alive || kind < UltimateBlackDream || kind > UltimateGhost {
+		return false
+	}
+	if p.UltimatePoints < UltimateRequirement || p.Ultimate != 0 {
+		return false
+	}
+	duration := time.Duration(0)
+	switch kind {
+	case UltimateBlackDream:
+		duration = UltimateBlackDreamS
+		p.BlackDreamUntil = now.Add(duration)
+	case UltimateInvincible:
+		duration = UltimateInvincibleS
+		p.InvincibleUntilUlt = now.Add(duration)
+	case UltimateGhost:
+		duration = UltimateGhostS
+		p.GhostUntil = now.Add(duration)
+	}
+	p.Ultimate = kind
+	p.UltimatePoints = 0
+	r.Emit(Event{Type: EvUltimate, Player: p.Id, Kind: kind, Ms: uint16(duration / time.Millisecond), Name: p.Name})
+	return true
+}
+
 func (r *Room) StartReload(p *PlayerState, now time.Time) bool {
 	if !p.Alive || p.Reloading || p.ActiveSlot > 2 {
 		return false
@@ -694,10 +949,35 @@ func (r *Room) Respawn(p *PlayerState, now time.Time) {
 	p.CmdKeys = 0
 	p.ApplyLoadout(p.Primary, p.Secondary)
 	p.InvincibleUntil = now.Add(SpawnProtectS)
+	if p.RevengeReady && !p.IsBot {
+		p.RevengeActive = true
+		p.RevengeShots = 10
+		p.InvincibleUntil = now.Add(10 * time.Second)
+		r.Emit(Event{Type: EvRevenge, Player: p.Id, Name: p.Name})
+	}
+	p.RevengeReady = false
+
 	p.LandingUntil, p.AimStarted = time.Time{}, time.Time{}
 	p.SpeedUntil, p.DmgUntil, p.RecoilUntil = time.Time{}, time.Time{}, time.Time{}
 	p.Streak = 0
+	p.UltimatePoints, p.Ultimate = 0, 0
+	p.BlackDreamUntil, p.InvincibleUntilUlt, p.GhostUntil = time.Time{}, time.Time{}, time.Time{}
 	p.RespawnAt = time.Time{}
+
+	// Bond system: auto-pair unbonded human players
+	if p.BondMate == 0 && !p.IsBot {
+		for _, other := range r.Players {
+			o := &other.PlayerState
+			if o.Id == p.Id || o.IsBot || o.BondMate != 0 || !o.Alive {
+				continue
+			}
+			p.BondMate = o.Id
+			o.BondMate = p.Id
+			r.Emit(Event{Type: EvBondEvent, Player: p.Id, Victim: o.Id, Kind: 3, Name: p.Name})
+			break
+		}
+	}
+
 	r.Emit(Event{Type: EvRespawn, Player: p.Id, Origin: p.Pos})
 }
 
@@ -753,14 +1033,14 @@ const (
 )
 
 const (
-	speedBoostDuration     = 8 * time.Second
-	speedBoostMultiplier   = 1.35
-	streakDmgCap           = 1.35
-	streakSpeedCap         = 1.45
-	streakHealCap          = 55
-	streakDurationCap      = 10 * time.Second
-	streakScaleCap         = 8
-	streakPickCap          = 3
+	speedBoostDuration         = 8 * time.Second
+	speedBoostMultiplier       = 1.35
+	streakDmgCap               = 1.35
+	streakSpeedCap             = 1.45
+	streakHealCap              = 55
+	streakDurationCap          = 10 * time.Second
+	streakScaleCap             = 8
+	streakPickCap              = 3
 	StreakAmmo           uint8 = 1
 	StreakHeal           uint8 = 2
 	StreakSpeed          uint8 = 4
@@ -1000,27 +1280,9 @@ func AimDir(yaw, pitch float64) Vec3 {
 	return Vec3{-math.Sin(yaw) * cp, math.Sin(pitch), -math.Cos(yaw) * cp}
 }
 func weaponSpread(def WeaponDef, vx, vz float64, onGround, crouching, landing, aiming bool, burstShots int) float64 {
-	moveFactor := math.Min(1, math.Hypot(vx, vz)/3)
-	spread := def.SpreadDeg + (def.MoveSpreadDeg-def.SpreadDeg)*moveFactor
-	spread += math.Min(.28, float64(burstShots)*def.BloomDeg*.14)
-	if !onGround {
-		spread = math.Max(spread, def.MoveSpreadDeg*1.55+.45)
-	}
-	if crouching {
-		spread *= .72
-	}
-	if aiming && !isSniper(def.Id) {
-		if isShotgun(def.Id) {
-			spread *= .85
-		} else {
-			spread *= .62
-		}
-	}
-	if landing {
-		spread = math.Max(spread, def.MoveSpreadDeg*1.12)
-	}
+	floor := 0.0
 	if isGun(def.Id) {
-		floor := 0.28
+		floor = 0.28
 		switch {
 		case isShotgun(def.Id):
 			floor = 1.25
@@ -1033,9 +1295,26 @@ func weaponSpread(def WeaponDef, vx, vz float64, onGround, crouching, landing, a
 		case def.Id == 0 || def.Id == 1 || def.Id == 7:
 			floor = 0.22
 		}
-		if floor > 0 && spread < floor {
-			spread = floor
+	}
+	base := math.Max(def.SpreadDeg, floor)
+	moveFactor := math.Min(1, math.Hypot(vx, vz)/3)
+	spread := base + (def.MoveSpreadDeg-base)*moveFactor
+	spread += math.Min(.28, float64(burstShots)*def.BloomDeg*.14)
+	if crouching {
+		spread *= .68
+	}
+	if aiming && !isSniper(def.Id) {
+		if isShotgun(def.Id) {
+			spread *= .85
+		} else {
+			spread *= .62
 		}
+	}
+	if !onGround {
+		spread = math.Max(spread, def.MoveSpreadDeg*1.55+.45)
+	}
+	if landing {
+		spread = math.Max(spread, def.MoveSpreadDeg*1.12)
 	}
 	return spread
 }

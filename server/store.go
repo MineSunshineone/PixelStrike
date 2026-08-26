@@ -86,6 +86,9 @@ func NewStore(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO meta(key,val) VALUES('bot_count',8)`); err != nil {
+		return nil, err
+	}
 	// Migrate pre-binding databases: CREATE TABLE IF NOT EXISTS won't add
 	// columns to an existing stats table.
 	for _, col := range []string{"ip", "fingerprint"} {
@@ -521,6 +524,12 @@ func (s *Store) IncrMeta(key string, by int64) int64 {
 		return 0
 	}
 	return v
+}
+
+func (s *Store) SetMeta(key string, value int64) error {
+	_, err := s.db.Exec(`INSERT INTO meta(key,val) VALUES(?,?)
+		ON CONFLICT(key) DO UPDATE SET val=excluded.val`, key, value)
+	return err
 }
 
 func (s *Store) GetMeta(key string) int64 {
