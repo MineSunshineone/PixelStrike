@@ -183,7 +183,7 @@ func (r *Room) eventsFor(target *Player, evts []Event) []Event {
 	for _, e := range evts {
 		send := false
 		switch e.Type {
-		case EvKill, EvPlayerName, EvPlayerLeave, EvFlightToggle, EvRevenge, EvBondEvent:
+		case EvKill, EvPlayerName, EvPlayerLeave, EvFlightToggle, EvRevenge, EvBondEvent, EvChat:
 			send = true
 		case EvUltimate:
 			send = true

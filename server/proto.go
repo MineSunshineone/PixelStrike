@@ -20,6 +20,7 @@ const (
 	OpRosterRequest = 0x0A
 	OpToggleFlight  = 0x0B
 	OpUltimate      = 0x0C
+	OpChat          = 0x0D
 
 	OpWelcome     = 0x81
 	OpSnapshot    = 0x82
@@ -50,6 +51,7 @@ const (
 	EvRevenge
 	EvBondEvent
 	EvUltimate
+	EvChat
 )
 
 type Event struct {
@@ -59,6 +61,7 @@ type Event struct {
 	Origin, Dir                 Vec3
 	Ms                          uint16
 	Name                        string
+	Message                     string
 }
 
 type Buf struct{ b []byte }
@@ -218,6 +221,14 @@ func Events(evts []Event) []byte {
 			nb := safeNameBytes(e.Name)
 			w.U8(uint8(len(nb)))
 			w.b = append(w.b, nb...)
+		case EvChat:
+			w.U16(e.Player)
+			nb := safeNameBytes(e.Name)
+			w.U8(uint8(len(nb)))
+			w.b = append(w.b, nb...)
+			mb := safeChatBytes(e.Message)
+			w.U8(uint8(len(mb)))
+			w.b = append(w.b, mb...)
 		}
 	}
 	return w.Bytes()
@@ -226,6 +237,14 @@ func Events(evts []Event) []byte {
 func safeNameBytes(name string) []byte {
 	b := []byte(name)
 	for len(b) > 64 || !utf8.Valid(b) {
+		b = b[:len(b)-1]
+	}
+	return b
+}
+
+func safeChatBytes(text string) []byte {
+	b := []byte(text)
+	for len(b) > maxChatBytes || !utf8.Valid(b) {
 		b = b[:len(b)-1]
 	}
 	return b

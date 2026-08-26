@@ -11,6 +11,7 @@ export const OP = {
   RosterRequest: 0x0a,
   ToggleFlight: 0x0b,
   Ultimate: 0x0c,
+  Chat: 0x0d,
   Welcome: 0x81,
   Snapshot: 0x82,
   Events: 0x83,

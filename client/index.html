@@ -620,6 +620,69 @@
     .kill-row .weapon { color: var(--accent-hi); font: 800 12px var(--font-mono); padding: 1px 4px; background: rgb(0 0 0 / .4); border-radius: 2px; }
     .kill-row .head-badge { color: #f59e0b; font: 800 10px var(--font-mono); padding: 1px 5px; background: rgba(245, 158, 11, 0.2); border: 1px solid #f59e0b; border-radius: 2px; }
     .kill-row .action { color: var(--muted); font-size: 10px; }
+
+    #chat-panel {
+      position: absolute;
+      left: 24px;
+      bottom: 148px;
+      width: min(380px, 38vw);
+      z-index: 40;
+      display: grid;
+      gap: 7px;
+      pointer-events: none;
+    }
+    #chat-log {
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 4px;
+      max-height: 168px;
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity .2s ease;
+    }
+    #chat-log.active { opacity: 1; }
+    .chat-row {
+      display: grid;
+      grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+      gap: 6px;
+      align-items: baseline;
+      max-width: 100%;
+      padding: 4px 7px;
+      background: rgb(8 11 9 / .76);
+      border-left: 3px solid rgb(154 163 150 / .5);
+      color: var(--paper);
+      font: 12px/1.35 var(--font-ui);
+      box-shadow: 0 2px 9px rgb(0 0 0 / .28);
+    }
+    .chat-row.mine { border-left-color: var(--accent-hi); background: rgb(50 35 16 / .84); }
+    .chat-name { color: var(--accent-hi); font: 700 10px var(--font-mono); white-space: nowrap; }
+    .chat-text { min-width: 0; overflow-wrap: anywhere; }
+    #chat-input {
+      width: 100%;
+      min-height: 32px;
+      padding: 4px 8px;
+      border: 1px solid var(--line-strong);
+      background: rgb(7 10 8 / .92);
+      color: var(--paper);
+      font: 700 12px var(--font-ui);
+      outline: none;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .12s ease, border-color .12s ease;
+    }
+    #chat-panel.composing #chat-input {
+      opacity: 1;
+      pointer-events: auto;
+      border-color: var(--accent-hi);
+      box-shadow: 0 0 0 1px rgb(201 130 43 / .28), 0 3px 14px rgb(0 0 0 / .32);
+    }
+    #chat-panel.composing #chat-log { opacity: 1; }
+
+    @media (max-width: 800px) {
+      #chat-panel { left: 10px; bottom: 220px; width: min(300px, 68vw); }
+      #chat-log { max-height: 116px; }
+      #chat-input { min-height: 38px; font-size: 16px; }
+    }
     #kill-streak {
       position: absolute;
       left: 50%;
@@ -1986,6 +2049,7 @@
                 <div class="key-row"><kbd>G / 4</kbd><span>手雷投掷</span></div>
                 <div class="key-row"><kbd>1 2 3</kbd><span>切枪 / 刀</span></div>
                 <div class="key-row"><kbd>Tab</kbd><span>战绩面板</span></div>
+                <div class="key-row"><kbd>T</kbd><span>战术聊天</span></div>
               </div>
             </div>
           </div>
@@ -2006,6 +2070,10 @@
       <span>总带宽 <strong id="bandwidth-value">0.0 Mbps</strong></span>
     </div>
     <div id="killfeed" aria-live="polite"></div>
+    <div id="chat-panel" aria-label="战术聊天">
+      <div id="chat-log" aria-live="polite"></div>
+      <input id="chat-input" maxlength="120" autocomplete="off" spellcheck="false" placeholder="按 Enter 发送 · Esc 取消" aria-label="聊天输入">
+    </div>
     <div id="kill-streak" role="status" aria-live="assertive"></div>
         <div id="ultimate-panel" aria-live="polite">
       <div class="ultimate-icon">⚡</div>

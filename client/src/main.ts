@@ -379,6 +379,13 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (!joined || interactive) return;
+  if (e.code === 'KeyT' && !e.repeat && !e.metaKey && !e.altKey && !e.ctrlKey) {
+    e.preventDefault();
+    clearCombatInput();
+    hud.setChatInputOpen(true);
+    hud.chatInput.focus();
+    return;
+  }
   if (e.metaKey || e.altKey) return;
   if (e.ctrlKey && e.code !== 'ControlLeft' && e.code !== 'ControlRight') {
     if (!/^(Key[WASDRG]|Digit[1234]|Space)$/.test(e.code)) return;
@@ -1133,6 +1140,10 @@ net.onEvents = (events) => {
 };
 
 function handleEvent(e: GameEvent) {
+  if (e.type === 17) {
+    hud.addChatMessage(e.name ?? nameOf(e.player), e.message ?? '', e.player === net.yourId);
+    return;
+  }
   if (e.type === 14) {
     hud.showRevengeAnnouncement(e.name ?? nameOf(e.player));
     return;
@@ -1378,6 +1389,10 @@ function handleEvent(e: GameEvent) {
     return;
   }
 }
+
+hud.onChatSubmit = (text) => {
+  if (!practice) net.sendChat(text);
+};
 
 function nameOf(id?: number): string {
   const known = id === net.yourId ? myName : names.get(id ?? -1);

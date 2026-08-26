@@ -734,6 +734,22 @@ func TestEventsNeverSplitsUTF8Rune(t *testing.T) {
 	}
 }
 
+func TestChatEncodingAndSanitize(t *testing.T) {
+	text := "  收到，A点集合！\n\r\u0000  "
+	want := "收到，A点集合！"
+	if got := sanitizeChat(text); got != want {
+		t.Fatalf("sanitizeChat = %q, want %q", got, want)
+	}
+	long := strings.Repeat("汉", 140)
+	if got := sanitizeChat(long); len([]rune(got)) != maxChatRunes {
+		t.Fatalf("sanitized chat rune count = %d", len([]rune(got)))
+	}
+	b := Events([]Event{{Type: EvChat, Player: 7, Name: "甲", Message: "你好"}})
+	if len(b) != 16 || b[0] != OpEvents || b[1] != 1 || b[2] != EvChat || binary.LittleEndian.Uint16(b[3:]) != 7 || b[5] != 3 || string(b[6:9]) != "甲" || b[9] != 6 || string(b[10:]) != "你好" {
+		t.Fatalf("bad chat event: %v", b)
+	}
+}
+
 func TestBondAvengeSurvivesRespawnAndScoresOnce(t *testing.T) {
 	now := time.Unix(100, 0)
 	attacker := &Player{PlayerState: PlayerState{Id: 1, IsBot: true, Alive: true, BondMate: 2}}

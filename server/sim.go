@@ -92,6 +92,10 @@ const (
 	UltimateGhostS      = 10 * time.Second
 
 	GhostSpeedMultiplier = 1.45
+	chatCooldown         = time.Second
+
+	maxChatRunes = 120
+	maxChatBytes = 160
 )
 
 type PlayerState struct {
@@ -124,6 +128,7 @@ type PlayerState struct {
 	LastInputSeq, LastShotSeq                                      uint16
 	HasShot                                                        bool
 	LastShotAt                                                     time.Time
+	NextChatAt                                                     time.Time
 	ShotCounter                                                    uint8
 	inputWindowStart                                               time.Time
 	inputCount                                                     int
