@@ -10,6 +10,7 @@ const grenadeStep = new THREE.Vector3();
 const FIRE_COLORS = [0xff2200, 0xff5500, 0xff9900, 0xffdd33, 0xfffa88];
 const SMOKE_COLORS = [0x1e1e22, 0x38383e, 0x55555c, 0x777780];
 const DEATH_COLORS = [0x00a8aa, 0x2b3577, 0xd9a377, 0x3a3a3a];
+const FEATHER_COLORS = [0xf2ede0, 0xe4ddc9, 0xd8d0bc, 0xe8a13a];
 
 interface ParticleData {
   x: number;
@@ -158,6 +159,28 @@ export class ParticleSystem {
         life: 650 + Math.random() * 500,
         size: 1.8 + Math.random() * 2.2,
         gravity: 18,
+      });
+    }
+  }
+
+  spawnFeathers(pos: THREE.Vector3) {
+    const count = Math.min(28, MAX_PARTICLES - this.particles.length);
+    const now = performance.now();
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 2.5;
+      this.particles.push({
+        x: pos.x + (Math.random() - 0.5) * 0.3,
+        y: pos.y + 0.25 + (Math.random() - 0.5) * 0.3,
+        z: pos.z + (Math.random() - 0.5) * 0.3,
+        vx: Math.cos(angle) * speed,
+        vy: 1.8 + Math.random() * 2.6,
+        vz: Math.sin(angle) * speed,
+        color: i % 6 === 0 ? FEATHER_COLORS[FEATHER_COLORS.length - 1] : FEATHER_COLORS[i % (FEATHER_COLORS.length - 1)],
+        born: now,
+        life: 800 + Math.random() * 700,
+        size: 0.9 + Math.random() * 0.9,
+        gravity: 4,
       });
     }
   }

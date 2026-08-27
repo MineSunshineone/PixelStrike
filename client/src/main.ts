@@ -1137,6 +1137,7 @@ net.onWelcome = (id, _revision) => {
   }
   for (const pickupId of pickupStates.keys()) world?.removePickup(pickupId);
   pickupStates.clear();
+  world?.clearChickens();
   joined = true;
   lastSentInputKeys = -1;
   hud.hideDisconnect();
@@ -1478,6 +1479,27 @@ function handleEvent(e: GameEvent) {
   }
   if (e.type === 12 && e.player !== undefined) {
     if (e.kind === 1) hud.showFlightAnnouncement(e.name || nameOf(e.player));
+    return;
+  }
+  if (e.type === 18 && e.chicken !== undefined && e.origin) {
+    world?.setChicken(e.chicken, e.origin[0], e.origin[1], e.origin[2], e.dir?.[0] ?? 0, e.dir?.[2] ?? 0);
+    return;
+  }
+  if (e.type === 19 && e.chicken !== undefined) {
+    const pos = world?.takeChickenDeath(e.chicken);
+    const at = pos ?? e.origin;
+    if (at) {
+      particles.spawnFeathers(eventOrigin.set(at[0], at[1], at[2]));
+      playSpatial('cluck', at[0], at[2], 0.7, 60, 1 + Math.random() * 0.25 - 0.12);
+    }
+    const killer = roster.get(e.killer ?? -1);
+    if (e.killer !== undefined && e.killer !== net.yourId) {
+      hud.killFeedEntry(killer ? killer.name : nameOf(e.killer), '战场小鸡', e.weapon ?? 6, false, false);
+    } else if (e.killer === net.yourId) {
+      hud.killFeedEntry(myName, '战场小鸡', e.weapon ?? 6, false, true);
+      audio.play('kill_confirm', 0.7, 1.3, 0, true);
+      hud.showPickupNotice('🍗 战场小鸡做成炸鸡:+25 HP', 'health');
+    }
     return;
   }
   if (e.type === 13 && e.player === net.yourId) {

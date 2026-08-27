@@ -406,10 +406,14 @@ export class WorldView {
   private lastAmbientTick = -1;
   private pickupTemplates: THREE.Group[];
   private pickups = new Map<number, THREE.Group>();
+  private chickenTemplate: THREE.Group;
+  private chickens = new Map<number, { mesh: THREE.Group; tx: number; ty: number; tz: number; targetYaw: number }>();
+  private lastAnimT = 0;
   boxes: { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number }[] = [];
   constructor(scene: THREE.Scene, map: MapData) {
     this.scene = scene;
     this.pickupTemplates = [this.createPickup(0), this.createPickup(1), this.createPickup(2)];
+    this.chickenTemplate = this.createChicken();
 
     // 1. Build Repeating-UV High-Definition Voxel Map with Merged Geometries per Material
     const byMat = new Map<number, THREE.BufferGeometry[]>();
@@ -519,6 +523,62 @@ export class WorldView {
     if (!pickup) return;
     this.group.remove(pickup);
     this.pickups.delete(id);
+  }
+
+  // ---- Battlefield chickens (CS-style easter egg) ----
+
+  private createChicken(): THREE.Group {
+    const white = new THREE.MeshLambertMaterial({ color: 0xf2ede0 });
+    const cream = new THREE.MeshLambertMaterial({ color: 0xe4ddc9 });
+    const orange = new THREE.MeshLambertMaterial({ color: 0xe8a13a });
+    const red = new THREE.MeshLambertMaterial({ color: 0xcc3b36 });
+    const black = new THREE.MeshLambertMaterial({ color: 0x24211e });
+    const box = (mat: THREE.Material, w: number, h: number, d: number, x: number, y: number, z: number, rx = 0) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      m.position.set(x, y, z);
+      m.rotation.x = rx;
+      return m;
+    };
+    const chicken = new THREE.Group();
+    chicken.add(box(white, 0.36, 0.32, 0.48, 0, 0.34, 0));            // body
+    chicken.add(box(cream, 0.26, 0.22, 0.1, 0, 0.44, 0.28, -0.55));   // tail
+    chicken.add(box(cream, 0.06, 0.2, 0.3, -0.21, 0.38, 0.02));       // left wing
+    chicken.add(box(cream, 0.06, 0.2, 0.3, 0.21, 0.38, 0.02));        // right wing
+    chicken.add(box(orange, 0.05, 0.18, 0.05, -0.08, 0.09, 0));       // legs
+    chicken.add(box(orange, 0.05, 0.18, 0.05, 0.08, 0.09, 0));
+    chicken.add(box(white, 0.22, 0.22, 0.2, 0, 0.58, -0.27));         // head
+    chicken.add(box(red, 0.05, 0.1, 0.16, 0, 0.74, -0.25));           // comb
+    chicken.add(box(red, 0.04, 0.07, 0.04, 0, 0.56, -0.42));          // wattle
+    chicken.add(box(orange, 0.08, 0.06, 0.12, 0, 0.57, -0.42));       // beak
+    chicken.add(box(black, 0.03, 0.05, 0.05, -0.115, 0.62, -0.33));   // eyes
+    chicken.add(box(black, 0.03, 0.05, 0.05, 0.115, 0.62, -0.33));
+    return chicken;
+  }
+
+  setChicken(id: number, x: number, y: number, z: number, dirX: number, dirZ: number) {
+    let entry = this.chickens.get(id);
+    if (!entry) {
+      const mesh = this.chickenTemplate.clone();
+      mesh.position.set(x, y, z);
+      entry = { mesh, tx: x, ty: y, tz: z, targetYaw: mesh.rotation.y };
+      this.chickens.set(id, entry);
+      this.group.add(mesh);
+    }
+    entry.tx = x; entry.ty = y; entry.tz = z;
+    if (dirX !== 0 || dirZ !== 0) entry.targetYaw = Math.atan2(-dirX, -dirZ);
+  }
+
+  takeChickenDeath(id: number): [number, number, number] | null {
+    const entry = this.chickens.get(id);
+    if (!entry) return null;
+    this.group.remove(entry.mesh);
+    this.chickens.delete(id);
+    return [entry.mesh.position.x, entry.mesh.position.y, entry.mesh.position.z];
+  }
+
+  clearChickens() {
+    for (const { mesh } of this.chickens.values()) this.group.remove(mesh);
+    this.chickens.clear();
   }
 
   private setupSky() {
@@ -654,6 +714,26 @@ export class WorldView {
       pickup.rotation.y = t * 0.0018 + id;
       pickup.position.y = pickup.userData.baseY + Math.sin(t * 0.003 + id) * 0.08;
       pickup.scale.setScalar(1 + Math.sin(t * 0.004 + id) * 0.06);
+    }
+    const dt = Math.min(0.1, (t - this.lastAnimT) / 1000);
+    this.lastAnimT = t;
+    const smooth = 1 - Math.exp(-dt * 6);
+    for (const [id, chicken] of this.chickens) {
+      const dx = chicken.tx - chicken.mesh.position.x;
+      const dz = chicken.tz - chicken.mesh.position.z;
+      const gap = Math.hypot(dx, dz);
+      const moving = gap > 0.05;
+      if (moving) {
+        chicken.mesh.position.x += dx * smooth;
+        chicken.mesh.position.z += dz * smooth;
+        let dyaw = chicken.targetYaw - chicken.mesh.rotation.y;
+        dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+        chicken.mesh.rotation.y += dyaw * smooth;
+      }
+      // waddle: quick hops while walking, a gentle breathing bob while idle
+      const hopPhase = t * 0.02 + id * 1.7;
+      chicken.mesh.position.y = chicken.ty + (moving ? Math.abs(Math.sin(hopPhase)) * 0.07 : Math.sin(t * 0.003 + id) * 0.012);
+      chicken.mesh.rotation.z = moving ? Math.sin(hopPhase) * 0.06 : 0;
     }
   }
 }

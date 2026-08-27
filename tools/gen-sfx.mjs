@@ -157,4 +157,19 @@ wav('knife_slash', mix(sweep(1350, 240, 0.15, 0.42, 15), tone(760, 0.075, 'noise
 wav('knife_hit', mix(tone(135, 0.13, 'sine', 0.65, 20), tone(1750, 0.035, 'saw', 0.45, 48), tone(580, 0.055, 'noise', 0.32, 30)));
 wav('weapon_switch', cat(tone(1900, 0.025, 'noise', 0.26, 65), tone(760, 0.045, 'square', 0.22, 42), tone(1500, 0.035, 'saw', 0.26, 48)));
 wav('grenade_explode', mix(gunshot(0.9, 7, 0.12, 0.035), tone(48, 0.8, 'sine', 0.9, 3)));
-console.log('generated 29 game WAV audio assets');
+
+// 11. Battlefield chicken easter egg
+function cluckChirp(f0, f1, dur, vol) {
+  const n = sec(dur), out = new Float64Array(n);
+  let ph = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    const f = f0 + (f1 - f0) * (i / n);
+    ph += 2 * Math.PI * f / SR;
+    const rasp = (Math.sin(ph * 2.5) > 0.3 ? 1 : 0.62);
+    out[i] = Math.sin(ph) * vol * Math.exp(-t * 26) * rasp;
+  }
+  return out;
+}
+wav('cluck', cat(cluckChirp(980, 300, 0.075, 0.85), delayed(cluckChirp(1180, 360, 0.065, 0.7), 0.02)));
+console.log('generated 30 game WAV audio assets');

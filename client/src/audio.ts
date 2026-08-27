@@ -8,6 +8,7 @@ const SFX_NAMES = [
   'step', 'reload_click', 'bolt_rack',
   'mag_out', 'mag_in', 'bolt_cycle', 'empty_click',
   'knife_slash', 'knife_hit', 'weapon_switch',
+  'cluck',
 ] as const;
 
 export type SfxName = (typeof SFX_NAMES)[number];
@@ -240,6 +241,24 @@ export class AudioEngine {
         noise(0.04, 5200);
         osc('sawtooth', 720, 220, 0.05);
         break;
+      case 'cluck': {
+        // 两声快速下坠的"咯咯"叫声
+        const chirp = (f0: number, f1: number, offset: number, dur: number) => {
+          const o = ctx.createOscillator();
+          o.type = 'square';
+          o.frequency.setValueAtTime(f0, t0 + offset);
+          o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + offset + dur);
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(0.35, t0 + offset);
+          g.gain.exponentialRampToValueAtTime(0.001, t0 + offset + dur);
+          o.connect(g).connect(out);
+          o.start(t0 + offset);
+          o.stop(t0 + offset + dur + 0.02);
+        };
+        chirp(950, 320, 0, 0.07);
+        chirp(1150, 380, 0.11, 0.06);
+        break;
+      }
     }
   }
 }
