@@ -696,6 +696,51 @@
       box-shadow: 0 0 0 1px rgb(201 130 43 / .28), 0 3px 14px rgb(0 0 0 / .32);
     }
     #chat-panel.composing #chat-log { opacity: 1; }
+    /* 快捷喊话条：H 键或顶栏 ⚡ 打开，数字键/点按直接发送 */
+    #quick-chat {
+      position: fixed;
+      left: 50%;
+      bottom: 168px;
+      transform: translateX(-50%);
+      display: none;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: min(92vw, 560px);
+      z-index: 44;
+    }
+    #quick-chat.open { display: flex; }
+    .qc-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 13px;
+      background: rgba(22, 27, 24, 0.92);
+      border: 1px solid rgba(240, 234, 220, 0.45);
+      color: var(--paper);
+      font: 700 12px var(--font-ui);
+      letter-spacing: .02em;
+      border-radius: 17px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+      cursor: pointer;
+      transition: transform .08s ease, border-color .08s ease, background-color .08s ease;
+    }
+    .qc-chip kbd {
+      display: inline-grid;
+      place-items: center;
+      min-width: 15px;
+      height: 15px;
+      padding: 0 3px;
+      border: 1px solid rgba(240, 234, 220, 0.5);
+      border-radius: 4px;
+      color: var(--muted);
+      font: 800 9px var(--font-mono);
+    }
+    .qc-chip:active {
+      transform: scale(0.94);
+      border-color: #ffd166;
+      background: rgba(201, 130, 43, 0.5);
+    }
 
     @media (max-width: 800px) {
       #chat-panel { left: 10px; bottom: 220px; width: min(300px, 68vw); }
@@ -2104,6 +2149,7 @@
                 <div class="key-row"><kbd>1 2 3</kbd><span>切枪 / 刀</span></div>
                 <div class="key-row"><kbd>Tab</kbd><span>战绩面板</span></div>
                 <div class="key-row"><kbd>T</kbd><span>战术聊天</span></div>
+                <div class="key-row"><kbd>H</kbd><span>快捷喊话</span></div>
               </div>
             </div>
           </div>
@@ -2128,6 +2174,7 @@
       <div id="chat-log" aria-live="polite"></div>
       <input id="chat-input" maxlength="120" autocomplete="off" spellcheck="false" placeholder="按 Enter 发送 · Esc 取消" aria-label="聊天输入">
     </div>
+    <div id="quick-chat" role="dialog" aria-label="快捷喊话"></div>
     <div id="kill-streak" role="status" aria-live="assertive"></div>
         <div id="ultimate-panel" aria-live="polite">
       <div class="ultimate-icon">⚡</div>
@@ -2259,6 +2306,9 @@
         <button id="btn-touch-chat" class="touch-icon-btn" type="button" aria-label="聊天">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>
         </button>
+        <button id="btn-touch-quickchat" class="touch-icon-btn" type="button" aria-label="快捷喊话">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11L9.5 22 19 9.5h-6z"/></svg>
+        </button>
       </div>
 
       <!-- 左侧移动摇杆 -->
@@ -2370,6 +2420,14 @@
           <div class="field" id="touch-sens-field">
             <label for="touch-sens-slider">触屏滑动灵敏度</label>
             <input id="touch-sens-slider" type="range" min="10" max="100" value="50">
+          </div>
+          <div class="field" id="assist-mode-field">
+            <label for="assist-mode-select">辅助瞄准</label>
+            <select class="control" id="assist-mode-select">
+              <option value="off">关闭</option>
+              <option value="normal" selected>标准 · 触屏默认</option>
+              <option value="strong">强力 · 大锥角全吸附</option>
+            </select>
           </div>
           <button class="ghost-button" id="touch-layout-edit-btn" type="button">调节触控按键位置</button>
         </section>

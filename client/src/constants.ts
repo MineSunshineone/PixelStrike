@@ -125,6 +125,16 @@ export const ULTIMATES = [
 ] as const;
 export const scopeSettleMs = (id: number) => id === 5 ? 320 : id === 11 ? 240 : 0;
 
+// 快捷喊话预设：H 键 / 顶栏 ⚡ 打开，数字键或点按直接以聊天通道发送
+export const QUICK_CHAT_PHRASES = [
+  '收到 👍',
+  '撤退！',
+  '蹲这儿组队 🤝',
+  '集合推中',
+  '小心狙击手',
+  '炸鸡在这 🍗',
+] as const;
+
 export const KEY = {
   Forward: 1,
   Back: 2,

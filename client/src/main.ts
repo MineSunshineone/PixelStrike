@@ -6,7 +6,7 @@ import { Weapons } from './weapons.js';
 import { Hud } from './hud.js';
 import { AudioEngine, type SfxName } from './audio.js';
 import { ParticleSystem } from './particles.js';
-import { KEY, PHYS, WEAPONS, XM_PELLETS, ULTIMATE_REQUIREMENT, isGun, isPistol, isShotgun, isSniper, scopeSettleMs, type MapData, type PlayerSnap, type RosterEntry, type WeaponDef } from './constants.js';
+import { KEY, PHYS, WEAPONS, XM_PELLETS, ULTIMATE_REQUIREMENT, QUICK_CHAT_PHRASES, isGun, isPistol, isShotgun, isSniper, scopeSettleMs, type MapData, type PlayerSnap, type RosterEntry, type WeaponDef } from './constants.js';
 import bundledMap from '../../map.json';
 
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -99,6 +99,7 @@ let displayedCrosshair = 0;
 let activeSlot = 1;
 let lastWeaponSlot = 1;
 let grenadePrimed = false;
+let lastQuickChatAt = 0;
 let userPrimaryChoice = -1;
 let userSecondaryChoice = -1;
 let userPrimaryWeaponSkin = 3;
@@ -107,6 +108,8 @@ let userSecondaryWeaponSkin = 3;
 let myAllyBotId = -1;
 let myBondMateId = -1;
 let assistTargetId = -1;
+// 雷达小鸡标记（事件驱动：spawn/heartbeat 更新，death 移除）
+const chickenPositions = new Map<number, [number, number]>();
 let assistLocked = false;
 let assistYaw = 0;
 let assistPitch = 0;
@@ -123,6 +126,22 @@ const AIM_ASSIST_DROP = 14 * Math.PI / 180;
 const AIM_ASSIST_SHOT_SNAP_MAX = 3.5 * Math.PI / 180;
 const AIM_ASSIST_PULL_HIP = 110 * Math.PI / 180;
 const AIM_ASSIST_PULL_ADS = 70 * Math.PI / 180;
+
+// 三档辅助瞄准参数：off 直接短路；strong 放宽锥角、放开弹道吸附
+function aimAssistTuning() {
+  if (hud.assistMode === 'strong') {
+    return {
+      range: 45,
+      coneHip: 12 * Math.PI / 180,
+      coneAds: 8 * Math.PI / 180,
+      drop: 18 * Math.PI / 180,
+      snap: 10 * Math.PI / 180,
+      pullHip: 150 * Math.PI / 180,
+      pullAds: 95 * Math.PI / 180,
+    };
+  }
+  return { range: AIM_ASSIST_RANGE, coneHip: AIM_ASSIST_CONE_HIP, coneAds: AIM_ASSIST_CONE_ADS, drop: AIM_ASSIST_DROP, snap: AIM_ASSIST_SHOT_SNAP_MAX, pullHip: AIM_ASSIST_PULL_HIP, pullAds: AIM_ASSIST_PULL_ADS };
+}
 const GRENADE_PREVIEW_STEPS = 45;
 const GRENADE_PREVIEW_DT = 1.8 / GRENADE_PREVIEW_STEPS;
 
@@ -310,6 +329,7 @@ function clearCombatInput() {
   assistLocked = false;
   assistTargetId = -1;
   hud.setAssistLock(false);
+  hud.toggleQuickChat(false);
   stopAiming();
   weapons.resetMotion();
   const knob = document.getElementById('touch-joystick-knob');
@@ -461,6 +481,11 @@ window.addEventListener('keydown', (e) => {
   const interactive = !isLock && isInteractiveTarget(e.target);
 
   if (e.code === 'Escape' && joined) {
+    if (hud.isQuickChatOpen()) {
+      e.preventDefault();
+      hud.toggleQuickChat(false);
+      return;
+    }
     pointerUnlockRequested = true;
     e.preventDefault();
     clearCombatInput();
@@ -468,6 +493,19 @@ window.addEventListener('keydown', (e) => {
     document.exitPointerLock?.();
     if (document.fullscreenElement) void document.exitFullscreen();
     hud.showPause(true);
+    return;
+  }
+  if (e.code === 'KeyH' && joined && !e.repeat && !e.metaKey && !e.altKey && !e.ctrlKey) {
+    // 快捷喊话条开关（聊天输入法打开时不抢键）
+    if (hud.isChatComposing()) return;
+    e.preventDefault();
+    hud.toggleQuickChat(!hud.isQuickChatOpen());
+    return;
+  }
+  if (hud.isQuickChatOpen() && /^Digit[1-6]$/.test(e.code) && !e.repeat) {
+    e.preventDefault();
+    const phrase = QUICK_CHAT_PHRASES[+e.code.at(-1)! - 1];
+    if (phrase) hud.onQuickChat?.(phrase);
     return;
   }
   if (!joined || interactive) return;
@@ -840,6 +878,12 @@ function setupTouchControls() {
     else primeGrenade();
   });
 
+  document.getElementById('btn-touch-quickchat')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!joined) return;
+    hud.toggleQuickChat(!hud.isQuickChatOpen());
+  });
   document.getElementById('btn-touch-pause')?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1193,6 +1237,7 @@ net.onWelcome = (id, _revision) => {
   for (const pickupId of pickupStates.keys()) world?.removePickup(pickupId);
   pickupStates.clear();
   world?.clearChickens();
+  chickenPositions.clear();
   joined = true;
   lastSentInputKeys = -1;
   hud.hideDisconnect();
@@ -1529,6 +1574,7 @@ function handleEvent(e: GameEvent) {
     // EvExplosion
     particles.spawnExplosion(eventOrigin.set(...e.origin));
     playSpatial('grenade_explode', e.origin[0], e.origin[2], 0.9, 95);
+    hud.pingRadar(e.origin[0], e.origin[2], false);
     const d = Math.hypot(e.origin[0] - local.pos.x, e.origin[2] - local.pos.z);
     if (d < 45) {
       screenShake = Math.max(screenShake, (1 - d / 45) * 0.18);
@@ -1587,9 +1633,11 @@ function handleEvent(e: GameEvent) {
   }
   if (e.type === 18 && e.chicken !== undefined && e.origin) {
     world?.setChicken(e.chicken, e.origin[0], e.origin[1], e.origin[2], e.dir?.[0] ?? 0, e.dir?.[2] ?? 0);
+    chickenPositions.set(e.chicken, [e.origin[0], e.origin[2]]);
     return;
   }
   if (e.type === 19 && e.chicken !== undefined) {
+    chickenPositions.delete(e.chicken);
     const pos = world?.takeChickenDeath(e.chicken);
     const at = pos ?? e.origin;
     if (at) {
@@ -1637,6 +1685,16 @@ hud.onChatSubmit = (text) => {
   if (!practice) net.sendChat(text);
 };
 
+// 快捷喊话：走 EvChat 通道，客户端先做 1.2s 节流（服务端另有 1s 冷却）
+hud.onQuickChat = (text) => {
+  hud.toggleQuickChat(false);
+  if (!joined || practice) return;
+  const now = performance.now();
+  if (now - lastQuickChatAt < 1200) return;
+  lastQuickChatAt = now;
+  net.sendChat(text);
+};
+
 function nameOf(id?: number): string {
   const known = id === net.yourId ? myName : names.get(id ?? -1);
   return known?.trim() || `特战队员${id ?? '?'}`;
@@ -1659,6 +1717,7 @@ function refreshScoreboard() {
 }
 
 remotes.onShot = (s, position, burstShots) => {
+  if (s.id !== net.yourId) hud.pingRadar(position.x, position.z, s.id === myAllyBotId);
   if (s.weapon === 6) {
     playSpatial('knife_slash', position.x, position.z, 0.55, 22);
     return;
@@ -1825,6 +1884,15 @@ function frame(t: number) {
     mouseY = 0;
 
     hud.updateRadar(local.pos.x, local.pos.z, local.yaw, t);
+    const radarMarkers: { x: number; z: number; kind: 'ally' | 'bond' | 'chicken' }[] = [];
+    const pushMarker = (id: number, kind: 'ally' | 'bond') => {
+      const s = states.get(id);
+      if (s && s.state & 1) radarMarkers.push({ x: s.x, z: s.z, kind });
+    };
+    if (myAllyBotId !== -1) pushMarker(myAllyBotId, 'ally');
+    if (myBondMateId !== -1) pushMarker(myBondMateId, 'bond');
+    for (const [, pos] of chickenPositions) radarMarkers.push({ x: pos[0], z: pos[1], kind: 'chicken' });
+    hud.setRadarMarkers(radarMarkers);
     const localReloading = weapons.isReloading(t);
     const reloadPending = reloadPendingSlot === activeSlot;
     hud.setReloading(activeSlot <= 2 && (localReloading || reloadPending), localReloading ? weapons.getReloadProgress(t) : 1);
@@ -1865,8 +1933,9 @@ function fire(mode: number, t: number) {
   let shotYaw = local.yaw;
   let shotPitch = local.pitch;
   if (assistLocked && assistTargetId !== -1 && weapons.weaponId !== 6 && activeSlot !== 4) {
-    shotYaw += clampAbs(wrapAngleDelta(assistYaw - local.yaw), AIM_ASSIST_SHOT_SNAP_MAX);
-    shotPitch = Math.max(-1.45, Math.min(1.45, shotPitch + clampAbs(assistPitch - local.pitch, AIM_ASSIST_SHOT_SNAP_MAX)));
+    const snap = aimAssistTuning().snap;
+    shotYaw += clampAbs(wrapAngleDelta(assistYaw - local.yaw), snap);
+    shotPitch = Math.max(-1.45, Math.min(1.45, shotPitch + clampAbs(assistPitch - local.pitch, snap)));
   }
   if (t - lastPatternShot > 420) patternShots = 0;
   const spread = weapons.weaponId === 6 ? 0 : localSpread(t);
@@ -1993,8 +2062,9 @@ interface AssistTarget { id: number; yaw: number; pitch: number }
 
 // 在锁敌锥角内挑选离准星最近的存活敌人；排除出生保护、隐身和非法队友，要求通视。
 function pickAimAssistTarget(): AssistTarget | null {
-  if (!joined || !alive || activeSlot === 4 || weapons.weaponId === 6) return null;
-  if (!document.body.classList.contains('touch-device') || !world) return null;
+  if (hud.assistMode === 'off' || !joined || !alive || activeSlot === 4 || weapons.weaponId === 6) return null;
+  if (!world) return null;
+  const tune = aimAssistTuning();
   const ox = local.pos.x;
   const oy = local.eyeY();
   const oz = local.pos.z;
@@ -2003,11 +2073,11 @@ function pickAimAssistTarget(): AssistTarget | null {
   const fy = Math.sin(local.pitch);
   const fz = -Math.cos(local.yaw) * cp;
   let best: AssistTarget | null = null;
-  let bestAngle = Math.min(aiming ? AIM_ASSIST_CONE_ADS : AIM_ASSIST_CONE_HIP, AIM_ASSIST_DROP);
+  let bestAngle = Math.min(aiming ? tune.coneAds : tune.coneHip, tune.drop);
   const consider = (id: number, tx: number, ty: number, tz: number) => {
     const dx = tx - ox, dy = ty - oy, dz = tz - oz;
     const dist = Math.hypot(dx, dy, dz);
-    if (dist < 0.8 || dist > AIM_ASSIST_RANGE) return;
+    if (dist < 0.8 || dist > tune.range) return;
     const dot = (dx * fx + dy * fy + dz * fz) / dist;
     const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
     if (angle >= bestAngle) return;
@@ -2039,14 +2109,14 @@ function updateAimAssist(dt: number): boolean {
   assistTargetId = target.id;
   assistYaw = target.yaw;
   assistPitch = target.pitch;
+  const tune = aimAssistTuning();
   const dYaw = wrapAngleDelta(target.yaw - local.yaw);
   const dPitch = target.pitch - local.pitch;
-  if (Math.abs(dYaw) >= AIM_ASSIST_DROP || Math.abs(dPitch) >= AIM_ASSIST_DROP) {
+  if (Math.abs(dYaw) >= tune.drop || Math.abs(dPitch) >= tune.drop) {
     assistLocked = false;
     return false;
   }
-  const pull = aiming ? AIM_ASSIST_PULL_ADS : AIM_ASSIST_PULL_HIP;
-  const stepCap = pull * dt;
+  const stepCap = (aiming ? tune.pullAds : tune.pullHip) * dt;
   const frac = Math.min(1, dt * 9);
   local.yaw = local.yaw + clampAbs(dYaw * frac, stepCap);
   local.pitch = Math.max(-1.45, Math.min(1.45, local.pitch + clampAbs(dPitch * frac, stepCap)));
