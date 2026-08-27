@@ -498,6 +498,7 @@
       border-radius: 0;
       vertical-align: middle;
     }
+    .ally-badge { font-size: 11px; margin-left: 4px; vertical-align: middle; }
     .human-tag {
       color: #34d399;
       font-weight: 800;
@@ -974,6 +975,8 @@
     .player-health { height: 6px; overflow: hidden; border: 1px solid rgb(240 234 220 / .5); background: rgb(11 13 11 / .88); }
     .player-health i { display: block; width: 100%; height: 100%; transform-origin: left; }
     .player-hp { width: 21px; color: var(--paper); font: 700 9px var(--font-mono); text-align: right; }
+    .player-label.ally .player-name { color: #8be27e; }
+    .player-label.ally::after { content: '\1F91D'; font-size: 11px; }
 
     #crosshair {
       position: fixed;
@@ -1017,6 +1020,8 @@
     #crosshair[data-accuracy="warm"] { --crosshair-color: #efc464; }
     #crosshair[data-accuracy="wide"] { --crosshair-color: #df8068; }
     #crosshair[data-accuracy="wide"] .ch-line { opacity: .86; }
+    /* 辅助瞄准锁定：绿色提示（优先于 accuracy 配色） */
+    #crosshair[data-assist="on"] { --crosshair-color: #8be27e; }
     #crosshair.reloading .ch-line { background: var(--accent-hi); opacity: 0.55; }
     #crosshair.reloading .ch-dot { background: var(--accent-hi); transform: translate3d(calc(var(--ch-dot) / -2), calc(var(--ch-dot) / -2), 0) scale(1.6); box-shadow: 0 0 6px var(--accent-hi); }
     #crosshair[data-style="dot"].reloading .ch-dot { transform: translate3d(calc(var(--ch-size) / -2), calc(var(--ch-size) / -2), 0) scale(1.6); }

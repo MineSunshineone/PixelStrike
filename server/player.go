@@ -379,12 +379,18 @@ func (p *Player) applyQueuedInput() {
 	input := p.queuedInput
 	p.hasQueuedInput = false
 	p.inputMu.Unlock()
+	crouchPressed := input.keys&KeyCrouch != 0 && p.CmdKeys&KeyCrouch == 0
 	if input.keys&KeyAim != 0 && (p.CmdKeys&KeyAim == 0 || p.AimStarted.IsZero()) {
 		p.AimStarted = input.at
 	} else if input.keys&KeyAim == 0 {
 		p.AimStarted = time.Time{}
 	}
 	p.CmdKeys, p.Yaw, p.Pitch, p.LastInputSeq = input.keys, input.yaw, input.pitch, input.seq
+	if crouchPressed {
+		if room := p.Room; room != nil {
+			room.NoteCrouchTap(&p.PlayerState, input.at)
+		}
+	}
 }
 
 func (p *Player) Send(msg []byte) {

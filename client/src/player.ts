@@ -332,6 +332,8 @@ export class RemotePlayers {
   private skinLayers = [this.body, this.head, this.armR, this.armL, this.legR, this.legL];
   private layers = [...this.skinLayers, this.gun];
   nameOf: (id: number) => string = (id) => `特战队员${id}`;
+  // 非法小队队友判定：命中的玩家标签追加 ally 样式（绿色 + 🤝）。
+  isAllyOf: ((id: number) => boolean) | null = null;
 
   constructor(scene: THREE.Scene) {
     this.group.add(...this.layers);
@@ -589,6 +591,7 @@ export class RemotePlayers {
       if (label.id !== id || label.lastName !== name) {
         label.id = id;
         label.lastName = name;
+        label.root.classList.toggle('ally', !!this.isAllyOf?.(id));
         const isBot = name.startsWith('[BOT]') || name.startsWith('bot-');
         label.name.innerHTML = isBot
           ? `<span class="bot-badge">[AI]</span>${name.replace(/^\[BOT\]\s*/, '')}`
