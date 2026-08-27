@@ -1191,26 +1191,26 @@ type Grenade struct {
 
 const (
 	chickenCount     = 6
-	chickenSpeed     = 1.35                       // units per second
-	chickenStepDist  = chickenSpeed / TickRate    // per-tick travel distance
-	chickenWanderR   = 9.0                        // roam radius around home spawn
-	chickenHitHeight = 0.62                       // AABB height for bullet tests
-	chickenHeartbeat = 5 * time.Second            // max age of an idle chicken's last broadcast
+	chickenSpeed     = 1.35                    // units per second
+	chickenStepDist  = chickenSpeed / TickRate // per-tick travel distance
+	chickenWanderR   = 9.0                     // roam radius around home spawn
+	chickenHitHeight = 0.62                    // AABB height for bullet tests
+	chickenHeartbeat = 5 * time.Second         // max age of an idle chicken's last broadcast
 )
 
 // Battlefield chickens are the classic CS-style easter egg: harmless voxel
 // birds that roam between spawns and pop into fried-chicken rewards when shot.
 type Chicken struct {
-	Id                 uint16
-	Home               Vec3
-	Pos                Vec3
-	Dir                Vec3 // horizontal heading; zero means idling in place
-	Alive              bool
-	NextTurn           time.Time
-	RespawnAt          time.Time
-	lastEmitPos        Vec3
-	lastEmitAt         time.Time
-	forceEmit          bool
+	Id          uint16
+	Home        Vec3
+	Pos         Vec3
+	Dir         Vec3 // horizontal heading; zero means idling in place
+	Alive       bool
+	NextTurn    time.Time
+	RespawnAt   time.Time
+	lastEmitPos Vec3
+	lastEmitAt  time.Time
+	forceEmit   bool
 }
 
 func (r *Room) initChickens() {
