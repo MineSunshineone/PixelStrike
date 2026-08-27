@@ -28,6 +28,8 @@ export class LocalPlayer {
     else if (this.keys & KEY.Crouch) this.crouch = true;
     else if (canStand) this.crouch = false;
     let speed = PHYS.walkSpeed * (WEAPONS[this.weaponId]?.speedMult ?? 1) * this.speedMultiplier;
+    // Shift 冲刺：与服务端 Move() 保持同一条件，否则预测会回弹
+    if (!this.flying && moving && !this.crouch && this.keys & KEY.Descend) speed *= PHYS.sprintMultiplier;
     if (this.crouch) speed *= PHYS.crouchSpeed;
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     const targetX = (side * cos - forward * sin) * speed;
@@ -334,6 +336,8 @@ export class RemotePlayers {
   nameOf: (id: number) => string = (id) => `特战队员${id}`;
   // 非法小队队友判定：命中的玩家标签追加 ally 样式（绿色 + 🤝）。
   isAllyOf: ((id: number) => boolean) | null = null;
+  // 羁绊队友判定：命中的玩家标签追加 bond 样式（粉色 + 💕）。
+  isBondOf: ((id: number) => boolean) | null = null;
 
   constructor(scene: THREE.Scene) {
     this.group.add(...this.layers);
@@ -588,11 +592,13 @@ export class RemotePlayers {
       const id = model.state.id;
       const name = this.nameOf(id);
       const hp = Math.max(0, Math.min(100, model.state.hp));
+      label.root.classList.toggle('bond', !!this.isBondOf?.(id));
       if (label.id !== id || label.lastName !== name) {
         label.id = id;
         label.lastName = name;
         label.root.classList.toggle('ally', !!this.isAllyOf?.(id));
-        const isBot = name.startsWith('[BOT]') || name.startsWith('bot-');
+        // bit128 为服务端下发的 bot 标识；名字前缀只作旧服务器兼容兜底
+        const isBot = !!(model.state.state & 128) || name.startsWith('[BOT]') || name.startsWith('bot-');
         label.name.innerHTML = isBot
           ? `<span class="bot-badge">[AI]</span>${name.replace(/^\[BOT\]\s*/, '')}`
           : `<span class="human-badge">[真人]</span>${name}`;

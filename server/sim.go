@@ -61,6 +61,7 @@ const (
 	TickRate                    = 60
 	TickDT                      = 1.0 / TickRate
 	WalkSpeed                   = 6.4
+	SprintMultiplier            = 1.3
 	GroundAccel                 = 44.0
 	StopAccel                   = 60.0
 	AirAccel                    = 9.5
@@ -332,6 +333,10 @@ func (r *Room) Move(p *PlayerState, now time.Time) {
 	}
 	if p.Crouch {
 		speed *= CrouchSpeed
+	}
+	// Shift 冲刺：非飞行、非蹲伏且在移动时生效（飞行中 Shift 是下降）。
+	if k&KeyDescend != 0 && !p.Flying && moving && !p.Crouch {
+		speed *= SprintMultiplier
 	}
 	sin, cos := math.Sin(p.Yaw), math.Cos(p.Yaw)
 	wishX, wishZ := (side*cos-fwd*sin)*speed, (-fwd*cos-side*sin)*speed

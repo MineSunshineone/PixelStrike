@@ -950,13 +950,16 @@ export class Hud {
     }, 130);
   }
 
-  killFeedEntry(killer: string, victim: string, weapon: number, head: boolean, mine: boolean) {
+  killFeedEntry(killer: string, victim: string, weapon: number, head: boolean, mine: boolean, killerBot = false, victimBot = false) {
     if (!this.killfeed) return;
     const row = document.createElement('div');
     row.className = 'kill-row' + (mine ? ' mine' : '');
     const badge = WEAPON_BADGES[weapon] ?? 'HE';
-    const formatKillName = (n: string) => n.startsWith('[BOT]') ? esc(n) : `<span class="human-tag">[真人]</span>${esc(n)}`;
-    row.innerHTML = `<span class="killer">${formatKillName(killer)}</span><span class="action">使用</span><span class="weapon">${esc(badge)}</span>${head ? '<span class="head-badge">爆头</span>' : ''}<span class="action">击杀</span><span class="victim">${formatKillName(victim)}</span>`;
+    // isBot 由服务端快照 bit128 解析传入，bot 永不再被标成「真人」
+    const formatKillName = (n: string, isBot: boolean) => isBot
+      ? `<span class="bot-badge">[AI]</span>${esc(n.replace(/^\[BOT\]\s*/, ''))}`
+      : `<span class="human-tag">[真人]</span>${esc(n)}`;
+    row.innerHTML = `<span class="killer">${formatKillName(killer, killerBot)}</span><span class="action">使用</span><span class="weapon">${esc(badge)}</span>${head ? '<span class="head-badge">爆头</span>' : ''}<span class="action">击杀</span><span class="victim">${formatKillName(victim, victimBot)}</span>`;
     this.killfeed.prepend(row);
     while (this.killfeed.children.length > 6) {
       this.killfeed.lastElementChild?.remove();
@@ -1005,23 +1008,37 @@ export class Hud {
     this.announcementTimer = window.setTimeout(() => banner.classList.remove('show', 'revenge'), 4000);
   }
 
-  showBondEvent(kind: number, name: string, score: number) {
+  showBondEvent(kind: number, name: string, score: number, text?: string) {
     const banner = el('flight-announcement');
     const actor = name || (kind >= 4 ? 'AI 队友' : kind === 3 ? '特战队员' : '羁绊者');
-    switch (kind) {
-      case 1: banner.textContent = `🔥 ${actor} 为TA报仇了 · 羁绊值 ${score}`; break;
-      case 2: banner.textContent = `⚡ ${actor} 心有灵犀 · 羁绊值 ${score}`; break;
-      case 3: banner.textContent = `💘 ${actor} 缔结战场羁绊`; break;
-      case 4: banner.textContent = `🤝 已和 ${actor} 组成非法小队（蹲三次的秘密）`; break;
-      case 5: banner.textContent = `💔 与 ${actor} 的非法小队已解散`; break;
-      default: banner.textContent = `💕 ${actor} 守护了TA · 羁绊值 ${score}`;
+    if (!text) {
+      switch (kind) {
+        case 1: text = `🔥 ${actor} 为TA报仇了 · 羁绊值 ${score}`; break;
+        case 2: text = `⚡ ${actor} 心有灵犀 · 羁绊值 ${score}`; break;
+        case 3: text = `💘 ${actor} 缔结战场羁绊`; break;
+        case 4: text = `🤝 已和 ${actor} 组成非法小队（蹲三次的秘密）`; break;
+        case 5: text = `💔 与 ${actor} 的非法小队已解散`; break;
+        default: text = `💕 ${actor} 守护了TA · 羁绊值 ${score}`;
+      }
     }
+    banner.textContent = text;
     banner.classList.remove('revenge', 'show');
     banner.classList.add('bond');
     void banner.offsetWidth;
     banner.classList.add('show');
     clearTimeout(this.announcementTimer);
     this.announcementTimer = window.setTimeout(() => banner.classList.remove('show', 'bond'), 3200);
+  }
+
+  // 羁绊队友常驻牌：传入 null 隐藏。
+  setBondMate(name: string | null) {
+    const chip = el('bond-mate');
+    if (!name) {
+      chip.classList.remove('show');
+      return;
+    }
+    el('bond-mate-name').textContent = name;
+    chip.classList.add('show');
   }
 
   // 辅助瞄准锁定反馈：准星变色（见 index.html 的 #crosshair[data-assist]）。
@@ -1033,7 +1050,7 @@ export class Hud {
 
 
 
-  updateScoreboard(roster: RosterEntry[], states: Map<number, PlayerSnap>, myId: number, allyId = -1) {
+  updateScoreboard(roster: RosterEntry[], states: Map<number, PlayerSnap>, myId: number, allyId = -1, bondId = -1) {
     const sorted = [...roster].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || a.id - b.id);
     const rank = Math.max(1, sorted.findIndex((p) => p.id === myId) + 1);
     this.setOnlineRank(sorted.length, rank);
@@ -1049,15 +1066,17 @@ export class Hud {
       const alive = !!(s?.state && s.state & 1);
       const weapon = WEAPON_BADGES[s?.weapon ?? 3] ?? 'AK-47';
       const kd = p.deaths ? (p.kills / p.deaths).toFixed(2) : p.kills.toFixed(1);
-      const isBot = p.name.startsWith('[BOT]') || p.name.startsWith('bot-');
+      // bit128 为服务端下发的 bot 标识；名字前缀只作旧服务器兼容兜底
+      const isBot = !!(s?.state && s.state & 128) || p.name.startsWith('[BOT]') || p.name.startsWith('bot-');
       const nameHtml = isBot
         ? `<span class="bot-badge">[AI]</span><span>${esc(p.name.replace(/^\[BOT\]\s*/, ''))}</span>`
         : `<span class="human-badge">[真人]</span><b>${esc(p.name)}</b>`;
       const allyBadge = p.id === allyId && p.id !== myId ? '<span class="ally-badge">🤝</span>' : '';
+      const bondBadge = p.id === bondId && p.id !== myId ? '<span class="ally-badge">💕</span>' : '';
       return `
         <tr class="${p.id === myId ? 'me' : ''}">
           <td><span class="rank-badge ${i === 0 ? 'rank-gold' : i === 1 ? 'rank-silver' : i === 2 ? 'rank-bronze' : ''}">${i + 1}</span></td>
-          <td>${nameHtml}${allyBadge}${p.id === myId ? ' (你)' : ''}</td>
+          <td>${nameHtml}${bondBadge}${allyBadge}${p.id === myId ? ' (你)' : ''}</td>
           <td>${alive ? '<span style="color:#10b981;font-weight:700;">存活</span>' : '<span style="color:#64748b;">阵亡</span>'}</td>
           <td>${esc(weapon)}</td>
           <td style="color:#10b981;font-weight:800;">${p.kills}</td>
@@ -1177,13 +1196,13 @@ export class Hud {
     }
   }
 
-  addChatMessage(name: string, message: string, mine: boolean) {
+  addChatMessage(name: string, message: string, mine: boolean, isBot = false) {
     if (!this.chatLog) return;
     const row = document.createElement('div');
     row.className = 'chat-row' + (mine ? ' mine' : '');
     const sender = document.createElement('span');
     sender.className = 'chat-name';
-    sender.textContent = name || '特战队员';
+    sender.textContent = isBot ? `[AI] ${(name || '特战队员').replace(/^\[BOT\]\s*/, '')}` : (name || '特战队员');
     const body = document.createElement('span');
     body.className = 'chat-text';
     body.textContent = message;

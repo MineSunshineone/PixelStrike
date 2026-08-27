@@ -105,6 +105,7 @@ let userPrimaryWeaponSkin = 3;
 let userSecondaryWeaponSkin = 3;
 // 非法组队与辅助瞄准状态
 let myAllyBotId = -1;
+let myBondMateId = -1;
 let assistTargetId = -1;
 let assistLocked = false;
 let assistYaw = 0;
@@ -144,6 +145,7 @@ const roster = new Map<number, RosterEntry>();
 const pickupStates = new Map<number, { kind: number; origin: [number, number, number] }>();
 remotes.nameOf = (id) => names.get(id) ?? `特战队员${id}`;
 remotes.isAllyOf = (id) => id === myAllyBotId;
+remotes.isBondOf = (id) => id === myBondMateId;
 const deathTarget = new THREE.Vector3();
 const remoteShotOrigin = new THREE.Vector3();
 const remoteShotDir = new THREE.Vector3();
@@ -213,6 +215,7 @@ let touchLeft = false;
 let touchRight = false;
 let touchJump = false;
 let touchCrouch = false;
+let touchSprint = false;
 
 function keyMask(): number {
   let k = 0;
@@ -222,7 +225,8 @@ function keyMask(): number {
   if (keys.has('KeyD') || touchRight) k |= KEY.Right;
   if (keys.has('Space') || touchJump) k |= KEY.Jump;
   if (keys.has('KeyC') || keys.has('ControlLeft') || keys.has('ControlRight') || touchCrouch) k |= KEY.Crouch;
-  if (keys.has('ShiftLeft') || keys.has('ShiftRight')) k |= KEY.Descend;
+  // Shift：地面 = 冲刺，飞行中 = 下降（服务端同一语义）
+  if (keys.has('ShiftLeft') || keys.has('ShiftRight') || touchSprint) k |= KEY.Descend;
   return k;
 }
 
@@ -298,6 +302,7 @@ function clearCombatInput() {
   touchRight = false;
   touchJump = false;
   touchCrouch = false;
+  touchSprint = false;
   fireHeld = false;
   firePressed = false;
   knifeHeavyQueued = false;
@@ -467,6 +472,15 @@ window.addEventListener('keydown', (e) => {
   }
   if (!joined || interactive) return;
   if (e.code === 'KeyT' && !e.repeat && !e.metaKey && !e.altKey && !e.ctrlKey) {
+    e.preventDefault();
+    clearCombatInput();
+    hud.setChatInputOpen(true);
+    hud.chatInput.focus();
+    return;
+  }
+  if (e.code === 'Enter' && !e.repeat && !e.metaKey && !e.altKey && !e.ctrlKey) {
+    // Enter 与 T 一样打开聊天（输入框内 Enter 由输入框自己处理发送）
+    if (hud.isChatComposing()) return;
     e.preventDefault();
     clearCombatInput();
     hud.setChatInputOpen(true);
@@ -803,6 +817,13 @@ function setupTouchControls() {
     return true;
   }, () => { touchJump = false; });
 
+  const sprintBtn = document.getElementById('btn-touch-sprint');
+  bindHold(sprintBtn, () => {
+    if (!alive) return false;
+    touchSprint = true;
+    return true;
+  }, () => { touchSprint = false; });
+
   const crouchBtn = document.getElementById('btn-touch-crouch');
   bindPress(crouchBtn, () => {
     if (!alive) return;
@@ -825,6 +846,14 @@ function setupTouchControls() {
     clearCombatInput();
     hud.showPause(true);
   });
+  document.getElementById('btn-touch-chat')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!joined || hud.isChatComposing()) return;
+    clearCombatInput();
+    hud.setChatInputOpen(true);
+    hud.chatInput.focus();
+  });
   document.getElementById('btn-touch-score')?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -844,7 +873,7 @@ function setupTouchControls() {
     });
   }
 
-  const movableIds = ['touch-top-bar', 'touch-joystick-zone', 'btn-touch-fire', 'btn-touch-jump', 'btn-touch-crouch', 'btn-touch-aim', 'btn-touch-reload', 'btn-touch-nade'];
+  const movableIds = ['touch-top-bar', 'touch-joystick-zone', 'btn-touch-fire', 'btn-touch-jump', 'btn-touch-crouch', 'btn-touch-sprint', 'btn-touch-aim', 'btn-touch-reload', 'btn-touch-nade'];
   const offsets: Record<string, [number, number]> = {};
   try {
     const saved = JSON.parse(localStorage.getItem('ps_touch_layout') ?? '{}') as Record<string, unknown>;
@@ -1143,6 +1172,8 @@ hud.onExit = () => {
   roster.clear();
   names.clear();
   myAllyBotId = -1;
+  myBondMateId = -1;
+  hud.setBondMate(null);
 };
 
 hud.onSettingsClose = () => {
@@ -1155,6 +1186,9 @@ net.onWelcome = (id, _revision) => {
     states.clear();
     roster.clear();
     names.clear();
+    myAllyBotId = -1;
+    myBondMateId = -1;
+    hud.setBondMate(null);
   }
   for (const pickupId of pickupStates.keys()) world?.removePickup(pickupId);
   pickupStates.clear();
@@ -1191,6 +1225,9 @@ net.onDisconnect = (upgrading) => {
   reloadPendingSlot = 0;
   weapons.cancelReload();
   clearCombatInput();
+  myAllyBotId = -1;
+  myBondMateId = -1;
+  hud.setBondMate(null);
   if (!upgrading) hud.showDisconnect();
 };
 net.onLatency = (ms, outboundBps) => {
@@ -1279,7 +1316,7 @@ net.onEvents = (events) => {
 
 function handleEvent(e: GameEvent) {
   if (e.type === 17) {
-    hud.addChatMessage(e.name ?? nameOf(e.player), e.message ?? '', e.player === net.yourId);
+    hud.addChatMessage(e.name ?? nameOf(e.player), e.message ?? '', e.player === net.yourId, isBotId(e.player));
     return;
   }
   if (e.type === 14) {
@@ -1300,7 +1337,34 @@ function handleEvent(e: GameEvent) {
       ? (e.player === net.yourId ? e.victim : e.player)
       : e.victim;
     const who = kind >= 4 ? nameOf(otherId) : (e.name ?? nameOf(e.player));
-    hud.showBondEvent(kind, who, e.streak ?? 0);
+    // 羁绊事件个性化：说清楚"和谁"羁绊、谁为谁做了什么
+    let text: string | undefined;
+    if (kind === 3) {
+      const mateId = e.player === net.yourId ? e.victim : (e.victim === net.yourId ? e.player : -1);
+      if (mateId !== -1 && mateId !== undefined) {
+        myBondMateId = mateId;
+        hud.setBondMate(stripBotPrefix(nameOf(mateId)));
+        text = `💘 你已与 ${nameOf(mateId)} 缔结战场羁绊：Ta 会掩护你、为你复仇`;
+      }
+    } else if (kind === 6) {
+      // 羁绊队友离开：Player=留守者，Victim=离开者
+      if (e.player === net.yourId) {
+        myBondMateId = -1;
+        hud.setBondMate(null);
+        text = `💔 你的羁绊队友 ${nameOf(e.victim)} 离开了战场，羁绊解除`;
+      }
+    } else if (kind === 0) {
+      // 掩护：Player 击杀了靠近 Victim 的敌人
+      if (e.victim === net.yourId) text = `🛡 羁绊队友 ${who} 替你挡下了敌人 · 羁绊值 ${e.streak ?? 0}`;
+      else if (e.player === net.yourId) text = `🛡 你守护了羁绊队友 ${who} · 羁绊值 ${e.streak ?? 0}`;
+    } else if (kind === 1) {
+      // 复仇：Player 为 Victim 报了仇
+      if (e.player === net.yourId) text = `🔥 你为羁绊队友 ${who} 报仇了 · 羁绊值 ${e.streak ?? 0}`;
+      else if (e.victim === net.yourId) text = `🔥 羁绊队友 ${who} 为你报仇了 · 羁绊值 ${e.streak ?? 0}`;
+    } else if (kind === 2) {
+      if (e.player === net.yourId || e.victim === net.yourId) text = `⚡ 你与 ${who} 心有灵犀 · 羁绊值 ${e.streak ?? 0}`;
+    }
+    hud.showBondEvent(kind, who, e.streak ?? 0, text);
     refreshScoreboard();
     return;
   }
@@ -1309,7 +1373,7 @@ function handleEvent(e: GameEvent) {
     const killer = nameOf(e.killer);
     const victim = nameOf(e.victim);
     const mine = e.killer === net.yourId || e.victim === net.yourId;
-    hud.killFeedEntry(killer, victim, e.weapon ?? 3, e.headshot === 1, mine);
+    hud.killFeedEntry(killer, victim, e.weapon ?? 3, e.headshot === 1, mine, isBotId(e.killer), isBotId(e.victim));
     if (e.killer === net.yourId && e.victim !== net.yourId) {
       // 大招期间不涨点，本地先预估，服务端 SelfState 会同步修正
       if (ultimateKind === 0) {
@@ -1480,6 +1544,10 @@ function handleEvent(e: GameEvent) {
   if (e.type === 9 && e.player) {
     // EvPlayerLeave
     if (e.player === myAllyBotId) myAllyBotId = -1;
+    if (e.player === myBondMateId) {
+      myBondMateId = -1;
+      hud.setBondMate(null);
+    }
     remotes.remove(e.player);
     states.delete(e.player);
     roster.delete(e.player);
@@ -1573,8 +1641,20 @@ function nameOf(id?: number): string {
   return known?.trim() || `特战队员${id ?? '?'}`;
 }
 
+// 服务端快照 bit128 是 bot 的权威标识；名字前缀只兜底旧服务器
+function isBotId(id?: number): boolean {
+  const s = states.get(id ?? -1);
+  if (s) return !!(s.state & 128);
+  const n = names.get(id ?? -1) ?? '';
+  return n.startsWith('[BOT]') || n.startsWith('bot-');
+}
+
+function stripBotPrefix(name: string): string {
+  return name.replace(/^\[BOT\]\s*/, '');
+}
+
 function refreshScoreboard() {
-  hud.updateScoreboard([...roster.values()], states, net.yourId);
+  hud.updateScoreboard([...roster.values()], states, net.yourId, myAllyBotId, myBondMateId);
 }
 
 remotes.onShot = (s, position, burstShots) => {
