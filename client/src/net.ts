@@ -1,6 +1,6 @@
 import { OP, PROTOCOL_VERSION, type PlayerSnap, type RosterEntry } from './constants.js';
 
-export interface GameEvent { type:number; killer?:number; victim?:number; player?:number; weapon?:number; headshot?:number; origin?:[number,number,number]; dir?:[number,number,number]; name?:string; pickup?:number; kind?:number; ms?:number; streak?:number; message?:string }
+export interface GameEvent { type:number; killer?:number; victim?:number; player?:number; weapon?:number; headshot?:number; origin?:[number,number,number]; dir?:[number,number,number]; name?:string; pickup?:number; kind?:number; ms?:number; streak?:number; message?:string; chicken?:number }
 export interface SelfState { ack:number; slot:number; weapon:number; weaponSkin:number; mag:number; reserve:number; nades:number; ultimatePoints:number; ultimate:number }
 
 export class Net {
@@ -147,6 +147,11 @@ export class Net {
           e.message = new TextDecoder().decode(new Uint8Array(v.buffer, v.byteOffset + o + 4 + nameLen, messageLen));
           o += 4 + nameLen + messageLen; break;
         }
+        case 18:
+          e.chicken = v.getUint16(o, true); e.origin = vec(v, o + 2); e.dir = vec(v, o + 14); o += 26; break;
+        case 19:
+          e.killer = v.getUint16(o, true); e.chicken = v.getUint16(o + 2, true);
+          e.origin = vec(v, o + 4); e.weapon = v.getUint8(o + 16); o += 17; break;
       }
       rows.push(e);
     }
