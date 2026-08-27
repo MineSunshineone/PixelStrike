@@ -15,6 +15,7 @@ type Room struct {
 	Players               []*Player
 	Grenades              []*Grenade
 	Pickups               []Pickup
+	Chickens              []Chicken
 	nextNadeId, nextIdSeq uint16
 	tick                  uint32
 	pending               []Event
@@ -37,6 +38,7 @@ const RoomCap = 100
 func NewRoom(id int, w *World, s *Store) *Room {
 	r := &Room{Id: id, World: w, Store: s, nextIdSeq: 1, botAIs: make(map[uint16]*BotAI), history: make(map[uint16]*poseHistory), teamAttempts: make(map[uint16]*teamAttempt)}
 	r.initPickups()
+	r.initChickens()
 	return r
 }
 
@@ -68,6 +70,7 @@ func (r *Room) Remove(p *Player) {
 		r.botAIs = make(map[uint16]*BotAI)
 		r.history = make(map[uint16]*poseHistory)
 		r.Grenades, r.Pickups, r.pending = nil, nil, nil
+		r.Chickens = nil
 		return
 	}
 	r.Emit(Event{Type: EvPlayerLeave, Player: p.Id})
@@ -206,6 +209,10 @@ func (r *Room) eventsFor(target *Player, evts []Event) []Event {
 		case EvExplosion, EvNadeThrow:
 			send = horizontalWithin(target.Pos, e.Origin, 120)
 		case EvPickupSpawn, EvPickupTaken:
+			send = true
+		case EvChickenSpawn:
+			send = horizontalWithin(target.Pos, e.Origin, 120)
+		case EvChickenDeath:
 			send = true
 		case EvReloadStart:
 			if e.Player == target.Id {

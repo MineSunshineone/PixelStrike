@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 export const OP = {
   Join: 0x01,

@@ -284,6 +284,7 @@ func (r *Room) Step(now time.Time) {
 		r.CheckSanity(p)
 	}
 	r.StepPickups(now)
+	r.StepChickens(now)
 	r.recordHistory()
 }
 
@@ -512,6 +513,9 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 			if d, ok := RayPlayerAABBHeight(origin, shotDir, pose.Pos, height, math.Min(worldDist, maxDist)); ok && d < targetDist {
 				target, targetDist, hitY, hitHeight = o, d, origin.Y+shotDir.Y*d-pose.Pos.Y, height
 			}
+		}
+		if r.chickenShot(p, origin, shotDir, worldDist, targetDist, uint8(weapon), now) {
+			continue
 		}
 		if target == nil {
 			continue
@@ -1178,6 +1182,168 @@ type Grenade struct {
 	Pos, Vel      Vec3
 	ExplodesAt    time.Time
 	Active        bool
+}
+
+const (
+	chickenCount     = 6
+	chickenSpeed     = 1.35                       // units per second
+	chickenStepDist  = chickenSpeed / TickRate    // per-tick travel distance
+	chickenWanderR   = 9.0                        // roam radius around home spawn
+	chickenHitHeight = 0.62                       // AABB height for bullet tests
+	chickenHeartbeat = 5 * time.Second            // max age of an idle chicken's last broadcast
+)
+
+// Battlefield chickens are the classic CS-style easter egg: harmless voxel
+// birds that roam between spawns and pop into fried-chicken rewards when shot.
+type Chicken struct {
+	Id                 uint16
+	Home               Vec3
+	Pos                Vec3
+	Dir                Vec3 // horizontal heading; zero means idling in place
+	Alive              bool
+	NextTurn           time.Time
+	RespawnAt          time.Time
+	lastEmitPos        Vec3
+	lastEmitAt         time.Time
+	forceEmit          bool
+}
+
+func (r *Room) initChickens() {
+	if len(r.World.Spawns) == 0 {
+		return
+	}
+	r.Chickens = make([]Chicken, chickenCount)
+	for i := range r.Chickens {
+		r.Chickens[i] = Chicken{Id: uint16(300 + i)}
+		r.respawnChicken(&r.Chickens[i])
+	}
+}
+
+func (r *Room) respawnChicken(c *Chicken) {
+	c.Home = r.chickenSpot()
+	c.Pos = c.Home
+	c.Dir = Vec3{}
+	c.Alive = true
+	c.NextTurn = time.Time{}
+	c.forceEmit = true
+	r.Emit(Event{Type: EvChickenSpawn, Player: c.Id, Origin: c.Pos})
+}
+
+func (r *Room) chickenSpot() Vec3 {
+	var pos Vec3
+	for range 24 {
+		spawn := r.World.Spawns[rand.IntN(len(r.World.Spawns))]
+		pos = Vec3{spawn[0] + rand.Float64()*8 - 4, spawn[1], spawn[2] + rand.Float64()*8 - 4}
+		clear := true
+		for i := range r.Chickens {
+			other := &r.Chickens[i]
+			if !other.Alive || other == nil {
+				continue
+			}
+			dx, dz := pos.X-other.Pos.X, pos.Z-other.Pos.Z
+			if dx*dx+dz*dz < 25 {
+				clear = false
+				break
+			}
+		}
+		if clear && r.World.CanOccupy(pos, chickenHitHeight) {
+			return pos
+		}
+	}
+	return pos
+}
+
+func (r *Room) chickenEvents() []Event {
+	events := make([]Event, 0, len(r.Chickens))
+	for i := range r.Chickens {
+		c := &r.Chickens[i]
+		if c.Alive {
+			events = append(events, Event{Type: EvChickenSpawn, Player: c.Id, Origin: c.Pos, Dir: c.Dir})
+		}
+	}
+	return events
+}
+
+func (r *Room) StepChickens(now time.Time) {
+	if len(r.Chickens) == 0 {
+		return
+	}
+	for i := range r.Chickens {
+		c := &r.Chickens[i]
+		if !c.Alive {
+			if !now.Before(c.RespawnAt) {
+				r.respawnChicken(c)
+			}
+			continue
+		}
+		if now.After(c.NextTurn) {
+			c.NextTurn = now.Add(time.Duration(1+rand.IntN(3)) * time.Second)
+			dx, dz := c.Pos.X-c.Home.X, c.Pos.Z-c.Home.Z
+			farFromHome := dx*dx+dz*dz > chickenWanderR*chickenWanderR
+			if !farFromHome && rand.IntN(3) == 0 {
+				c.Dir = Vec3{} // stand still and peck at nothing in particular
+			} else if farFromHome {
+				c.Dir = norm(Vec3{c.Home.X - c.Pos.X, 0, c.Home.Z - c.Pos.Z})
+			} else {
+				angle := rand.Float64() * math.Pi * 2
+				c.Dir = Vec3{-math.Sin(angle), 0, -math.Cos(angle)}
+			}
+		}
+		moved := false
+		if c.Dir.X != 0 || c.Dir.Z != 0 {
+			next := Vec3{c.Pos.X + c.Dir.X*chickenStepDist, c.Pos.Y, c.Pos.Z + c.Dir.Z*chickenStepDist}
+			headY := next.Y + chickenHitHeight*0.6
+			if hit, dist := r.World.Raycast(Vec3{next.X, headY, next.Z}, c.Dir, chickenStepDist+0.4); !hit || dist > chickenStepDist {
+				if hitDown, dDown := r.World.Raycast(Vec3{next.X, next.Y + 1.2, next.Z}, Vec3{0, -1, 0}, 2.2); hitDown {
+					next.Y = next.Y + 1.2 - dDown
+				}
+				c.Pos = next
+				moved = true
+			} else {
+				c.NextTurn = time.Time{} // bump into cover: pick a fresh heading on the next tick
+			}
+		}
+		if c.forceEmit {
+			r.Emit(Event{Type: EvChickenSpawn, Player: c.Id, Origin: c.Pos, Dir: c.Dir})
+			c.lastEmitPos, c.lastEmitAt, c.forceEmit = c.Pos, now, false
+		} else if moved {
+			dx, dz := c.Pos.X-c.lastEmitPos.X, c.Pos.Z-c.lastEmitPos.Z
+			if dx*dx+dz*dz > 0.25 {
+				r.Emit(Event{Type: EvChickenSpawn, Player: c.Id, Origin: c.Pos, Dir: c.Dir})
+				c.lastEmitPos, c.lastEmitAt = c.Pos, now
+			}
+		} else if now.Sub(c.lastEmitAt) >= chickenHeartbeat {
+			// idling: occasional heartbeat repairs any lost position packet
+			r.Emit(Event{Type: EvChickenSpawn, Player: c.Id, Origin: c.Pos, Dir: c.Dir})
+			c.lastEmitPos, c.lastEmitAt = c.Pos, now
+		}
+	}
+}
+
+// chickenShot tests the pellet ray against every live chicken; the nearest hit
+// before the wall (and any player) turns the bird into a fried-chicken reward.
+func (r *Room) chickenShot(p *PlayerState, origin, dir Vec3, wallDist, playerDist float64, weapon uint8, now time.Time) bool {
+	var best *Chicken
+	bestDist := min(wallDist, playerDist)
+	for i := range r.Chickens {
+		c := &r.Chickens[i]
+		if !c.Alive {
+			continue
+		}
+		if d, ok := RayPlayerAABBHeight(origin, dir, c.Pos, chickenHitHeight, bestDist); ok && d < bestDist {
+			best, bestDist = c, d
+		}
+	}
+	if best == nil {
+		return false
+	}
+	best.Alive = false
+	best.RespawnAt = now.Add(time.Duration(15+rand.IntN(10)) * time.Second)
+	if p.HP < MaxHP {
+		p.HP = uint8(min(MaxHP, int(p.HP)+25))
+	}
+	r.Emit(Event{Type: EvChickenDeath, Killer: p.Id, Victim: best.Id, Origin: best.Pos, Weapon: weapon})
+	return true
 }
 
 func (r *Room) ThrowGrenade(p *PlayerState, yaw, pitch float64, now time.Time) {

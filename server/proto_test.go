@@ -824,6 +824,20 @@ func TestBondEventEncoding(t *testing.T) {
 	}
 }
 
+func TestChickenEventEncoding(t *testing.T) {
+	b := Events([]Event{{Type: EvChickenSpawn, Player: 300, Origin: Vec3{X: 1.5, Y: 2, Z: 3}, Dir: Vec3{X: -1}}})
+	if len(b) != 29 || b[0] != OpEvents || b[1] != 1 || b[2] != EvChickenSpawn || binary.LittleEndian.Uint16(b[3:]) != 300 {
+		t.Fatalf("bad chicken spawn event: %v", b)
+	}
+	if f := math.Float32frombits(binary.LittleEndian.Uint32(b[5:])); f != 1.5 {
+		t.Fatalf("bad chicken origin X: %v", f)
+	}
+	b = Events([]Event{{Type: EvChickenDeath, Killer: 7, Victim: 301, Origin: Vec3{}, Weapon: 6}})
+	if len(b) != 20 || b[2] != EvChickenDeath || binary.LittleEndian.Uint16(b[3:]) != 7 || binary.LittleEndian.Uint16(b[5:]) != 301 || b[19] != 6 {
+		t.Fatalf("bad chicken death event: %v", b)
+	}
+}
+
 func TestPoseHistoryRing(t *testing.T) {
 	p := &Player{PlayerState: PlayerState{Id: 1}}
 	r := &Room{Players: []*Player{p}, history: make(map[uint16]*poseHistory)}

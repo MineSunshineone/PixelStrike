@@ -201,6 +201,9 @@ func (h *Hub) Join(p *Player, account, name string, primary, secondary, skin, pr
 	if pickups := room.pickupEvents(); len(pickups) > 0 {
 		p.Send(Events(pickups))
 	}
+	if chickens := room.chickenEvents(); len(chickens) > 0 {
+		p.Send(Events(chickens))
+	}
 	p.ready = true
 	if !room.running {
 		room.running = true
