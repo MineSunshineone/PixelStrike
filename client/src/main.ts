@@ -1598,7 +1598,8 @@ function handleEvent(e: GameEvent) {
     }
     const killer = roster.get(e.killer ?? -1);
     if (e.killer !== undefined && e.killer !== net.yourId) {
-      hud.killFeedEntry(killer ? killer.name : nameOf(e.killer), '战场小鸡', e.weapon ?? 6, false, false);
+      // 传入权威 bot 位：bot 做炸鸡时击杀者不能再显示成「真人」
+      hud.killFeedEntry(killer ? killer.name : nameOf(e.killer), '战场小鸡', e.weapon ?? 6, false, false, isBotId(e.killer));
     } else if (e.killer === net.yourId) {
       hud.killFeedEntry(myName, '战场小鸡', e.weapon ?? 6, false, true);
       audio.play('kill_confirm', 0.7, 1.3, 0, true);
