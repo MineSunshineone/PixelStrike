@@ -103,11 +103,25 @@ let userPrimaryChoice = -1;
 let userSecondaryChoice = -1;
 let userPrimaryWeaponSkin = 3;
 let userSecondaryWeaponSkin = 3;
+// 非法组队与辅助瞄准状态
+let myAllyBotId = -1;
+let assistTargetId = -1;
+let assistLocked = false;
+let assistYaw = 0;
+let assistPitch = 0;
 const PRIMARY_IDS = [3, 4, 2, 5, 8, 9, 10, 11, 12];
 const SECONDARY_IDS = [0, 1, 7];
 const CROSSHAIR_RECOVERY = [15, 8, 18, 11, 14, 7, 14, 17, 15, 16, 15, 9, 10] as const;
 const GRENADE_THROW_SPEED = 28;
 const GRENADE_LIFT = 4.2;
+// 移动端辅助瞄准：锁敌锥角、磁吸速率与弹道修正上限。
+const AIM_ASSIST_RANGE = 38;
+const AIM_ASSIST_CONE_HIP = 9 * Math.PI / 180;
+const AIM_ASSIST_CONE_ADS = 6 * Math.PI / 180;
+const AIM_ASSIST_DROP = 14 * Math.PI / 180;
+const AIM_ASSIST_SHOT_SNAP_MAX = 3.5 * Math.PI / 180;
+const AIM_ASSIST_PULL_HIP = 110 * Math.PI / 180;
+const AIM_ASSIST_PULL_ADS = 70 * Math.PI / 180;
 const GRENADE_PREVIEW_STEPS = 45;
 const GRENADE_PREVIEW_DT = 1.8 / GRENADE_PREVIEW_STEPS;
 
@@ -129,6 +143,7 @@ const names = new Map<number, string>();
 const roster = new Map<number, RosterEntry>();
 const pickupStates = new Map<number, { kind: number; origin: [number, number, number] }>();
 remotes.nameOf = (id) => names.get(id) ?? `特战队员${id}`;
+remotes.isAllyOf = (id) => id === myAllyBotId;
 const deathTarget = new THREE.Vector3();
 const remoteShotOrigin = new THREE.Vector3();
 const remoteShotDir = new THREE.Vector3();
@@ -143,6 +158,8 @@ const grenadeOrigin = new THREE.Vector3();
 const grenadeVelocityVec = new THREE.Vector3();
 const shotRight = new THREE.Vector3();
 const shotUp = new THREE.Vector3();
+const assistRayOrigin = new THREE.Vector3();
+const assistRayDir = new THREE.Vector3();
 const cameraCorrection = new THREE.Vector3();
 const grenadePreviewPositions = new Float32Array((GRENADE_PREVIEW_STEPS + 1) * 3);
 const grenadePreviewGeometry = new THREE.BufferGeometry();
@@ -285,6 +302,9 @@ function clearCombatInput() {
   firePressed = false;
   knifeHeavyQueued = false;
   grenadePrimed = false;
+  assistLocked = false;
+  assistTargetId = -1;
+  hud.setAssistLock(false);
   stopAiming();
   weapons.resetMotion();
   const knob = document.getElementById('touch-joystick-knob');
@@ -950,7 +970,7 @@ hud.onJoin = (name, primary, secondary, skin, primarySkin, secondarySkin) => {
 };
 
 interface DummyBox { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; head: boolean }
-interface DummyTarget { group: THREE.Group; boxes: DummyBox[] }
+interface DummyTarget { group: THREE.Group; boxes: DummyBox[]; cx: number; cy: number; cz: number }
 const dummies: DummyTarget[] = [];
 
 function enterPractice() {
@@ -1042,7 +1062,7 @@ function spawnDummies() {
     addBox(0.48, 0.78, 0, 0.22, 0.6, 0.22, bodyMat, false);
     addBox(0, 1.44, 0, 0.34, 0.34, 0.34, headMat, true);
     scene.add(group);
-    dummies.push({ group, boxes });
+    dummies.push({ group, boxes, cx, cy: groundY + 1.15, cz });
   }
 }
 
@@ -1122,6 +1142,7 @@ hud.onExit = () => {
   states.clear();
   roster.clear();
   names.clear();
+  myAllyBotId = -1;
 };
 
 hud.onSettingsClose = () => {
@@ -1265,7 +1286,21 @@ function handleEvent(e: GameEvent) {
     return;
   }
   if (e.type === 15) {
-    hud.showBondEvent(e.kind ?? 0, e.name ?? nameOf(e.player), e.streak ?? 0);
+    const kind = e.kind ?? 0;
+    if (kind === 4 && e.player === net.yourId) {
+      // 非法组队成立：记录 bot 队友（辅助瞄准排除、HUD 高亮）
+      myAllyBotId = e.victim ?? -1;
+    }
+    if (kind === 5 && (e.player === net.yourId || e.victim === net.yourId)) {
+      myAllyBotId = -1;
+    }
+    // 播报显示"对方"的名字：加入事件带 bot（victim）；解散事件取双方中不是自己的一方。
+    const otherId = kind === 5
+      ? (e.player === net.yourId ? e.victim : e.player)
+      : e.victim;
+    const who = kind >= 4 ? nameOf(otherId) : (e.name ?? nameOf(e.player));
+    hud.showBondEvent(kind, who, e.streak ?? 0);
+    refreshScoreboard();
     return;
   }
   if (e.type === 0) {
@@ -1443,6 +1478,7 @@ function handleEvent(e: GameEvent) {
   }
   if (e.type === 9 && e.player) {
     // EvPlayerLeave
+    if (e.player === myAllyBotId) myAllyBotId = -1;
     remotes.remove(e.player);
     states.delete(e.player);
     roster.delete(e.player);
@@ -1617,6 +1653,9 @@ function frame(t: number) {
       }
     }
 
+    // 移动端辅助瞄准：锁敌并在开火时磁吸视角（触屏设备生效）。
+    updateAimAssist(dt);
+
     const shouldFire = activeSlot !== 4 && (firePressed || !!WEAPONS[weapons.weaponId]?.automatic && fireHeld);
     if (weapons.weaponId === 6 && knifeHeavyQueued) {
       if (weapons.canFire(t)) {
@@ -1719,15 +1758,22 @@ requestAnimationFrame(frame);
 function fire(mode: number, t: number) {
   const origin = localShotOrigin.set(local.pos.x, local.eyeY(), local.pos.z);
   const autoRescope = isSniper(weapons.weaponId) && aiming && weapons.ammoLocal > 1;
+  // 辅助瞄准：把弹道（含服务端判定与曳光）修正到目标方向，最多偏离准星 3.5°。
+  let shotYaw = local.yaw;
+  let shotPitch = local.pitch;
+  if (assistLocked && assistTargetId !== -1 && weapons.weaponId !== 6 && activeSlot !== 4) {
+    shotYaw += clampAbs(wrapAngleDelta(assistYaw - local.yaw), AIM_ASSIST_SHOT_SNAP_MAX);
+    shotPitch = Math.max(-1.45, Math.min(1.45, shotPitch + clampAbs(assistPitch - local.pitch, AIM_ASSIST_SHOT_SNAP_MAX)));
+  }
   if (t - lastPatternShot > 420) patternShots = 0;
   const spread = weapons.weaponId === 6 ? 0 : localSpread(t);
   lastPatternShot = t;
   patternShots++;
   const pellets = Math.max(1, WEAPONS[weapons.weaponId]?.pellets ?? 1);
   const shotSample = (++shotSeq) & 0xff;
-  const dir = shotDirection(localShotDir, local.yaw, local.pitch, spread, pellets > 1 ? shotSample * 17 : shotSample, weapons.weaponId, net.yourId);
+  const dir = shotDirection(localShotDir, shotYaw, shotPitch, spread, pellets > 1 ? shotSample * 17 : shotSample, weapons.weaponId, net.yourId);
   weapons.onFired(t, weapons.weaponId === 6 && (mode & 1) !== 0 ? 1000 : undefined);
-  if (!practice) net.sendFire(shotSeq, net.lastServerTick, mode | (aiming ? 0x80 : 0), local.yaw, local.pitch);
+  if (!practice) net.sendFire(shotSeq, net.lastServerTick, mode | (aiming ? 0x80 : 0), shotYaw, shotPitch);
   mag = weapons.ammoLocal;
   if (isSniper(weapons.weaponId)) {
     stopAiming();
@@ -1740,7 +1786,7 @@ function fire(mode: number, t: number) {
     for (let i = 0; i < pellets; i++) {
       const pelletDir = i === 0 && !isShotgun(weapons.weaponId)
         ? dir
-        : shotDirection(localPelletDir, local.yaw, local.pitch, spread, isShotgun(weapons.weaponId) ? shotSample : shotSample * 17 + i, weapons.weaponId, net.yourId, isShotgun(weapons.weaponId) ? i : undefined);
+        : shotDirection(localPelletDir, shotYaw, shotPitch, spread, isShotgun(weapons.weaponId) ? shotSample : shotSample * 17 + i, weapons.weaponId, net.yourId, isShotgun(weapons.weaponId) ? i : undefined);
       let dist = world?.raycastDistance(origin, pelletDir, 180, impactNormal) ?? 180;
       const dummy = raycastDummies(origin, pelletDir, dist);
       let impactColor = 0xd6b36e;
@@ -1830,6 +1876,79 @@ function remoteSpread(s: PlayerSnap, burstShots: number): number {
   let spread = weaponSpread(def, s.vx, s.vz, !!(s.state & 8), !!(s.state & 4), false, !!(s.state & 16), Math.max(0, burstShots - 1));
   if (isSniper(s.weapon) && !(s.state & 16)) spread = Math.max(spread, def.moveSpread);
   return spread;
+}
+
+function wrapAngleDelta(d: number): number {
+  return Math.atan2(Math.sin(d), Math.cos(d));
+}
+
+function clampAbs(v: number, limit: number): number {
+  return Math.max(-limit, Math.min(limit, v));
+}
+
+interface AssistTarget { id: number; yaw: number; pitch: number }
+
+// 在锁敌锥角内挑选离准星最近的存活敌人；排除出生保护、隐身和非法队友，要求通视。
+function pickAimAssistTarget(): AssistTarget | null {
+  if (!joined || !alive || activeSlot === 4 || weapons.weaponId === 6) return null;
+  if (!document.body.classList.contains('touch-device') || !world) return null;
+  const ox = local.pos.x;
+  const oy = local.eyeY();
+  const oz = local.pos.z;
+  const cp = Math.cos(local.pitch);
+  const fx = -Math.sin(local.yaw) * cp;
+  const fy = Math.sin(local.pitch);
+  const fz = -Math.cos(local.yaw) * cp;
+  let best: AssistTarget | null = null;
+  let bestAngle = Math.min(aiming ? AIM_ASSIST_CONE_ADS : AIM_ASSIST_CONE_HIP, AIM_ASSIST_DROP);
+  const consider = (id: number, tx: number, ty: number, tz: number) => {
+    const dx = tx - ox, dy = ty - oy, dz = tz - oz;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist < 0.8 || dist > AIM_ASSIST_RANGE) return;
+    const dot = (dx * fx + dy * fy + dz * fz) / dist;
+    const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+    if (angle >= bestAngle) return;
+    assistRayDir.set(dx / dist, dy / dist, dz / dist);
+    if (world!.raycastDistance(assistRayOrigin.set(ox, oy, oz), assistRayDir, dist - 0.35) < dist - 0.4) return;
+    bestAngle = angle;
+    best = { id, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
+  };
+  for (const s of states.values()) {
+    if (s.id === net.yourId || s.id === myAllyBotId) continue;
+    if (!(s.state & 1) || s.state & 2 || s.ultimate === 3) continue;
+    consider(s.id, s.x, s.y + (s.state & 4 ? 0.85 : 1.15), s.z);
+  }
+  for (let i = 0; i < dummies.length; i++) {
+    consider(-1 - i, dummies[i].cx, dummies[i].cy, dummies[i].cz);
+  }
+  return best;
+}
+
+// 移动端辅助瞄准：锁敌、开火时按受限速率把视角拉向目标。返回本帧是否处于有效磁吸状态。
+function updateAimAssist(dt: number): boolean {
+  const target = pickAimAssistTarget();
+  hud.setAssistLock(!!target);
+  if (!target || !(fireHeld || firePressed)) {
+    assistLocked = false;
+    assistTargetId = -1;
+    return false;
+  }
+  assistTargetId = target.id;
+  assistYaw = target.yaw;
+  assistPitch = target.pitch;
+  const dYaw = wrapAngleDelta(target.yaw - local.yaw);
+  const dPitch = target.pitch - local.pitch;
+  if (Math.abs(dYaw) >= AIM_ASSIST_DROP || Math.abs(dPitch) >= AIM_ASSIST_DROP) {
+    assistLocked = false;
+    return false;
+  }
+  const pull = aiming ? AIM_ASSIST_PULL_ADS : AIM_ASSIST_PULL_HIP;
+  const stepCap = pull * dt;
+  const frac = Math.min(1, dt * 9);
+  local.yaw = local.yaw + clampAbs(dYaw * frac, stepCap);
+  local.pitch = Math.max(-1.45, Math.min(1.45, local.pitch + clampAbs(dPitch * frac, stepCap)));
+  assistLocked = true;
+  return true;
 }
 
 function applyRecoil(weapon: number, shot: number, ads: boolean) {

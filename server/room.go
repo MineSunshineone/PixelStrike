@@ -20,14 +20,22 @@ type Room struct {
 	pending               []Event
 	botAIs                map[uint16]*BotAI
 	history               map[uint16]*poseHistory
+	teamAttempts          map[uint16]*teamAttempt
 	outboundBuf           []outbound
 	quantizedBuf          []quantState
+}
+
+// teamAttempt tracks the consecutive crouch taps of one human for illegal teaming.
+type teamAttempt struct {
+	count   int
+	firstAt time.Time
+	lastAt  time.Time
 }
 
 const RoomCap = 100
 
 func NewRoom(id int, w *World, s *Store) *Room {
-	r := &Room{Id: id, World: w, Store: s, nextIdSeq: 1, botAIs: make(map[uint16]*BotAI), history: make(map[uint16]*poseHistory)}
+	r := &Room{Id: id, World: w, Store: s, nextIdSeq: 1, botAIs: make(map[uint16]*BotAI), history: make(map[uint16]*poseHistory), teamAttempts: make(map[uint16]*teamAttempt)}
 	r.initPickups()
 	return r
 }
@@ -41,6 +49,8 @@ func (r *Room) Remove(p *Player) {
 			mate.BondMate = 0
 		}
 	}
+	// 离开即解散非法小队，避免残留悬空的队友引用。
+	r.BreakIllegalTeam(&p.PlayerState)
 	for i, q := range r.Players {
 		if q == p {
 			r.Players = append(r.Players[:i], r.Players[i+1:]...)

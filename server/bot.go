@@ -83,6 +83,7 @@ func (r *Room) SetBotCount(count int) {
 	if len(currentBots) > count {
 		// Trim excess bots
 		for _, bot := range currentBots[count:] {
+			r.BreakIllegalTeam(&bot.PlayerState)
 			delete(r.botAIs, bot.Id)
 			delete(r.history, bot.Id)
 			for _, other := range r.Players {
@@ -190,7 +191,7 @@ func (r *Room) StepBots(now time.Time) {
 		}
 		if (r.tick+uint32(p.Id))%7 == 0 {
 			for _, other := range r.Players {
-				if other.Id == p.Id || !other.Alive || other.ProtectedAt(now) || other.Crouch || other.GhostAt(now) {
+				if other.Id == p.Id || !other.Alive || other.ProtectedAt(now) || other.Crouch || other.GhostAt(now) || other.Id == p.IllegalMate {
 					continue
 				}
 				speed := math.Hypot(other.Vel.X, other.Vel.Z)
@@ -213,7 +214,7 @@ func (r *Room) StepBots(now time.Time) {
 			huntingRevenge := ai.RevengeID != 0 && now.Before(ai.RevengeUntil)
 			for i := range r.Players {
 				other := &r.Players[i].PlayerState
-				if other.Id == p.Id || !other.Alive || other.ProtectedAt(now) || other.GhostAt(now) {
+				if other.Id == p.Id || !other.Alive || other.ProtectedAt(now) || other.GhostAt(now) || other.Id == p.IllegalMate {
 					continue
 				}
 				dx := other.Pos.X - p.Pos.X
@@ -386,13 +387,23 @@ func (r *Room) StepBots(now time.Time) {
 				}
 			}
 		} else {
-			hearing := now.Before(ai.HearUntil)
+			// 非法小队：跟随结盟的真人，贴身护卫而非四处游走。
+			var mate *PlayerState
+			if p.IllegalMate != 0 {
+				if m := r.findPlayer(p.IllegalMate); m != nil && m.Alive {
+					mate = &m.PlayerState
+					backX, backZ := math.Sin(mate.Yaw)*1.6, math.Cos(mate.Yaw)*1.6
+					ai.TargetPos = Vec3{mate.Pos.X + backX, mate.Pos.Y, mate.Pos.Z + backZ}
+					ai.NextWaypointAt = now.Add(time.Second)
+				}
+			}
+			hearing := now.Before(ai.HearUntil) && mate == nil
 			if hearing {
 				ai.TargetPos = ai.HearPos
 				ai.NextWaypointAt = now.Add(400 * time.Millisecond)
 			}
 			waypointDX, waypointDZ := p.Pos.X-ai.TargetPos.X, p.Pos.Z-ai.TargetPos.Z
-			if !hearing && (now.After(ai.NextWaypointAt) || waypointDX*waypointDX+waypointDZ*waypointDZ < 9) {
+			if !hearing && mate == nil && (now.After(ai.NextWaypointAt) || waypointDX*waypointDX+waypointDZ*waypointDZ < 9) {
 				ai.NextWaypointAt = now.Add(time.Duration(4+rand.IntN(6)) * time.Second)
 				if ai.RevengeID != 0 && now.Before(ai.RevengeUntil) {
 					if hunted := r.findPlayer(ai.RevengeID); hunted != nil && hunted.Alive {
@@ -411,7 +422,7 @@ func (r *Room) StepBots(now time.Time) {
 			dx := ai.TargetPos.X - p.Pos.X
 			dz := ai.TargetPos.Z - p.Pos.Z
 			targetYaw := math.Atan2(-dx, -dz)
-			if now.After(ai.NextGlanceAt) && !hearing {
+			if now.After(ai.NextGlanceAt) && !hearing && mate == nil {
 				sign := 1.0
 				if rand.Float64() < 0.5 {
 					sign = -1
@@ -420,7 +431,7 @@ func (r *Room) StepBots(now time.Time) {
 				ai.GlanceUntil = now.Add(280 * time.Millisecond)
 				ai.NextGlanceAt = now.Add(time.Duration(2800+rand.IntN(4200)) * time.Millisecond)
 			}
-			if now.Before(ai.GlanceUntil) && !hearing {
+			if now.Before(ai.GlanceUntil) && !hearing && mate == nil {
 				p.Yaw = yawToward(p.Yaw, ai.GlanceYaw, 0.28)
 			} else if hearing {
 				fwdX, fwdZ := -math.Sin(p.Yaw), -math.Cos(p.Yaw)
@@ -430,6 +441,14 @@ func (r *Room) StepBots(now time.Time) {
 					p.Yaw = yawToward(p.Yaw, targetYaw, 0.22)
 				}
 				moveKeys |= KeyForward
+			} else if mate != nil {
+				if dx*dx+dz*dz > 4.5 {
+					p.Yaw = yawToward(p.Yaw, targetYaw, 0.24)
+					moveKeys |= KeyForward
+				} else {
+					// 护卫站位：面向移动方向警戒（不转头张望）。
+					p.Yaw = yawToward(p.Yaw, targetYaw, 0.14)
+				}
 			} else {
 				p.Yaw = yawToward(p.Yaw, targetYaw, 0.2)
 				moveKeys |= KeyForward

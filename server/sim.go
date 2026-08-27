@@ -98,6 +98,11 @@ const (
 	GhostSpeedMultiplier = 1.45
 	chatCooldown         = time.Second
 
+	// 非法组队：在存活 bot 身边连续下蹲三次（4 秒窗口内）结为临时小队。
+	IllegalTeamRange   = 5.5
+	IllegalTeamPresses = 3
+	IllegalTeamWindow  = 4 * time.Second
+
 	maxChatRunes = 120
 	maxChatBytes = 160
 )
@@ -126,6 +131,7 @@ type PlayerState struct {
 	RevengeReady, RevengeActive                                    bool
 	RevengeShots                                                   uint8
 	BondMate                                                       uint16
+	IllegalMate                                                    uint16
 	BondScore                                                      uint8
 	LastKiller                                                     uint16
 	KilledAt                                                       time.Time
@@ -495,7 +501,7 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 		targetDist, hitY, hitHeight := maxDist, 0.0, StandingHeight
 		for _, other := range r.Players {
 			o := &other.PlayerState
-			if o == p || !o.Alive || o.ProtectedAt(now) || o.GhostAt(now) {
+			if o == p || !o.Alive || o.ProtectedAt(now) || o.GhostAt(now) || o.Id == p.IllegalMate {
 				continue
 			}
 			pose := r.poseAt(o.Id, seenTick, o.Pos, o.Crouch)
@@ -552,7 +558,7 @@ func (r *Room) revengeTarget(attacker *PlayerState, yaw, pitch float64, origin V
 	tanH := tanV * 21 / 9
 	for _, other := range r.Players {
 		target := &other.PlayerState
-		if target == attacker || !target.Alive || target.ProtectedAt(now) {
+		if target == attacker || !target.Alive || target.ProtectedAt(now) || target.Id == attacker.IllegalMate {
 			continue
 		}
 		pose := r.poseAt(target.Id, seenTick, target.Pos, target.Crouch)
@@ -718,6 +724,8 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 		}
 	}
 
+	// 死亡即散伙：非法小队随任一成员阵亡自动解散。
+	r.BreakIllegalTeam(victim)
 	victim.Alive, victim.Reloading = false, false
 	victim.RevengeActive, victim.RevengeShots = false, 0
 	victim.InvincibleUntil = time.Time{}
@@ -989,6 +997,7 @@ func (r *Room) Respawn(p *PlayerState, now time.Time) {
 			break
 		}
 	}
+	delete(r.teamAttempts, p.Id)
 
 	r.Emit(Event{Type: EvRespawn, Player: p.Id, Origin: p.Pos})
 }
@@ -1206,7 +1215,7 @@ func (r *Room) StepGrenades(now time.Time) {
 			if thrower != nil {
 				for _, pl := range r.Players {
 					v := &pl.PlayerState
-					if v == thrower || !v.Alive || v.ProtectedAt(now) {
+					if v == thrower || !v.Alive || v.ProtectedAt(now) || v.Id == thrower.IllegalMate {
 						continue
 					}
 					d := math.Sqrt(dist2(v.Pos, g.Pos))

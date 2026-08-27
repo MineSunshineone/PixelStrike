@@ -1007,11 +1007,13 @@ export class Hud {
 
   showBondEvent(kind: number, name: string, score: number) {
     const banner = el('flight-announcement');
-    const actor = name || (kind === 3 ? '特战队员' : '羁绊者');
+    const actor = name || (kind >= 4 ? 'AI 队友' : kind === 3 ? '特战队员' : '羁绊者');
     switch (kind) {
       case 1: banner.textContent = `🔥 ${actor} 为TA报仇了 · 羁绊值 ${score}`; break;
       case 2: banner.textContent = `⚡ ${actor} 心有灵犀 · 羁绊值 ${score}`; break;
       case 3: banner.textContent = `💘 ${actor} 缔结战场羁绊`; break;
+      case 4: banner.textContent = `🤝 已和 ${actor} 组成非法小队（蹲三次的秘密）`; break;
+      case 5: banner.textContent = `💔 与 ${actor} 的非法小队已解散`; break;
       default: banner.textContent = `💕 ${actor} 守护了TA · 羁绊值 ${score}`;
     }
     banner.classList.remove('revenge', 'show');
@@ -1022,9 +1024,16 @@ export class Hud {
     this.announcementTimer = window.setTimeout(() => banner.classList.remove('show', 'bond'), 3200);
   }
 
+  // 辅助瞄准锁定反馈：准星变色（见 index.html 的 #crosshair[data-assist]）。
+  setAssistLock(on: boolean) {
+    if ((this.crosshair.dataset.assist === 'on') === on) return;
+    if (on) this.crosshair.dataset.assist = 'on';
+    else delete this.crosshair.dataset.assist;
+  }
 
 
-  updateScoreboard(roster: RosterEntry[], states: Map<number, PlayerSnap>, myId: number) {
+
+  updateScoreboard(roster: RosterEntry[], states: Map<number, PlayerSnap>, myId: number, allyId = -1) {
     const sorted = [...roster].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || a.id - b.id);
     const rank = Math.max(1, sorted.findIndex((p) => p.id === myId) + 1);
     this.setOnlineRank(sorted.length, rank);
@@ -1044,10 +1053,11 @@ export class Hud {
       const nameHtml = isBot
         ? `<span class="bot-badge">[AI]</span><span>${esc(p.name.replace(/^\[BOT\]\s*/, ''))}</span>`
         : `<span class="human-badge">[真人]</span><b>${esc(p.name)}</b>`;
+      const allyBadge = p.id === allyId && p.id !== myId ? '<span class="ally-badge">🤝</span>' : '';
       return `
         <tr class="${p.id === myId ? 'me' : ''}">
           <td><span class="rank-badge ${i === 0 ? 'rank-gold' : i === 1 ? 'rank-silver' : i === 2 ? 'rank-bronze' : ''}">${i + 1}</span></td>
-          <td>${nameHtml}${p.id === myId ? ' (你)' : ''}</td>
+          <td>${nameHtml}${allyBadge}${p.id === myId ? ' (你)' : ''}</td>
           <td>${alive ? '<span style="color:#10b981;font-weight:700;">存活</span>' : '<span style="color:#64748b;">阵亡</span>'}</td>
           <td>${esc(weapon)}</td>
           <td style="color:#10b981;font-weight:800;">${p.kills}</td>
