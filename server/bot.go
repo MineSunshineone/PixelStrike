@@ -1,9 +1,18 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"time"
+)
+
+// 躺平系统参数；chance 用 var 方便测试注入。
+var botTiltChance = 0.5
+
+const (
+	botTiltDeaths   = 6               // 连败多少场开始考虑躺平
+	botTiltDuration = 8 * time.Second // 躺平时长（叠加重生延迟 3s）
 )
 
 // Expanded 12 Bot roster across all sectors of the map
@@ -49,6 +58,9 @@ type BotAI struct {
 	RevengeUntil time.Time
 	HearPos      Vec3
 	HearUntil    time.Time
+	// 躺平系统：连败过多后蹲在原地摆烂一会儿（TiltUntil 含重生延迟）。
+	DeathStreak uint8
+	TiltUntil   time.Time
 	NextGlanceAt time.Time
 	GlanceUntil  time.Time
 	GlanceYaw    float64
@@ -168,6 +180,14 @@ func (r *Room) StepBots(now time.Time) {
 		// using them across a long match.
 		if p.Grenades == 0 && now.After(ai.NextNadeAt.Add(25*time.Second)) {
 			p.Grenades = 1
+		}
+
+		// 躺平系统：连败过多的 bot 蹲在原地摆烂，不动不开火不索敌。
+		if now.Before(ai.TiltUntil) {
+			p.CmdKeys = KeyCrouch
+			ai.Target = nil
+			ai.TargetDist = 0
+			continue
 		}
 
 		// Scan for nearby visible enemy players (human or other bots).
@@ -476,6 +496,15 @@ func yawToward(cur, want, rate float64) float64 {
 	return cur + diff*rate
 }
 
+func (r *Room) hasAnyHuman() bool {
+	for _, pl := range r.Players {
+		if !pl.IsBot {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Room) botKilled(victim, killer *PlayerState, now time.Time) {
 	if victim == nil || killer == nil || !victim.IsBot || victim.Id == killer.Id {
 		return
@@ -489,6 +518,18 @@ func (r *Room) botKilled(victim, killer *PlayerState, now time.Time) {
 	ai.HearPos = killer.Pos
 	ai.HearUntil = now.Add(4 * time.Second)
 	ai.Target = nil
+	ai.DeathStreak++
+	if ai.DeathStreak >= botTiltDeaths && rand.Float64() < botTiltChance {
+		ai.TiltUntil = now.Add(RespawnDelayS + botTiltDuration)
+		if r.hasAnyHuman() {
+			r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报",
+				Message: fmt.Sprintf("%s 已连败 %d 场，当场躺平，勿扰", victim.Name, ai.DeathStreak)})
+		}
+	}
+	// 击杀者清零连败计数（非 bot 无 AI 记录，查表自然跳过）。
+	if kai := r.botAIs[killer.Id]; kai != nil {
+		kai.DeathStreak = 0
+	}
 }
 
 func (r *Room) botTookHit(victim, attacker *PlayerState, now time.Time) {
