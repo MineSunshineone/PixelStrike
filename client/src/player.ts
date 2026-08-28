@@ -93,6 +93,9 @@ const diamondGunColor = new THREE.Color(0x72e7ff);
 // Standing geometry spans 0.04–1.605 m; map it exactly onto the 2.1 m hitbox.
 export const STANDING_VISUAL_SCALE = 2.1 / 1.565;
 export const STANDING_VISUAL_OFFSET = -0.04 * STANDING_VISUAL_SCALE;
+// 大头模式：远程玩家头部放大倍数。纯视觉整活——命中判定仍在服务端的
+// 标准 AABB 上进行，大头并不更容易爆头（憨归憨，公平归公平）。
+export const BIG_HEAD_SCALE = 2;
 const approach = (value: number, wanted: number, amount: number) => value < wanted ? Math.min(wanted, value + amount) : Math.max(wanted, value - amount);
 const angleLerp = (a: number, b: number, t: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
 
@@ -478,7 +481,7 @@ export class RemotePlayers {
       this.place(this.body, model.index, model, sin, cos, 0, bodyY, 0, 0);
 
       // Head (Pivots at neck)
-      this.place(this.head, model.index, model, sin, cos, 0, headY, 0, model.pitch);
+      this.place(this.head, model.index, model, sin, cos, 0, headY, 0, model.pitch, 0, 0, 1, BIG_HEAD_SCALE);
       // Two-handed forward triangular V-shape weapon grip (尖尖双手持枪)
       const isKnife = state.weapon === 6;
       const pistolHold = state.weapon === 0 || state.weapon === 1 || state.weapon === 7;
@@ -624,6 +627,7 @@ export class RemotePlayers {
     yawOffset = 0,
     roll = 0,
     scaleZ = 1,
+    scale = 1,
   ) {
     const yaw = model.yaw + yawOffset;
     const standing = !(model.state.state & 4);
@@ -634,7 +638,7 @@ export class RemotePlayers {
       model.position.z - lx * sin + lz * cos,
     );
     this.dummy.rotation.set(pitch, yaw, roll, 'YXZ');
-    this.dummy.scale.set(1, scaleY, scaleZ);
+    this.dummy.scale.set(scale, scaleY * scale, scale * scaleZ);
     this.dummy.updateMatrix();
     mesh.setMatrixAt(index, this.dummy.matrix);
   }
