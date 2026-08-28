@@ -9,6 +9,28 @@ import (
 // Expanded 12 Bot roster across all sectors of the map
 const maxBotSkill = 2
 
+// bot 弹幕：每隔一阵随机存活 bot 以自己身份说句骚话（EvChat 全房可见）。
+var botChatMinGap = 45 * time.Second
+var botChatMaxGap = 90 * time.Second
+
+var botTrashTalk = []string{
+	"有人闻到炸鸡味吗？可能是我刚才开的枪",
+	"我不是针对谁，我是说在座的各位都是……哎呀谁打我",
+	"蹲是战术，不是害怕！",
+	"谁又扔雷？说好的绅士决斗呢？",
+	"刚才那波是我的锅，下一波还是我的锅",
+	"小鸡是无辜的，请把子弹留给我",
+	"系统提示：本 bot 已连续作战 72 小时，需要抱抱",
+	"你不要过来呀！",
+	"实测：蹲下真的不会变强，别问我怎么知道的",
+	"这把赢了请全场喝可乐，输了就当无事发生",
+	"狙击手在哪？出来！我数到三……三！",
+	"队友别慌，我这就白给支援！",
+	"我枪法很稳的，就是子弹有点歪",
+	"听说今天有人连败六场躺平了，节哀",
+	"都别抢，最后一只小鸡是我的！",
+}
+
 var botPrimaries = []uint8{3, 4, 2, 8, 9, 10, 12, 11}
 var botSecondaries = []uint8{0, 7, 1}
 
@@ -462,6 +484,39 @@ func (r *Room) StepBots(now time.Time) {
 		}
 
 		p.CmdKeys = moveKeys
+	}
+	r.stepBotChat(now)
+}
+
+// stepBotChat 驱动 bot 弹幕：到点随机选一名存活 bot 说一句骚话。
+func (r *Room) stepBotChat(now time.Time) {
+	if r.nextBotChatAt.IsZero() {
+		r.nextBotChatAt = now.Add(botChatMinGap + time.Duration(rand.IntN(int((botChatMaxGap-botChatMinGap)/time.Second)))*time.Second)
+		return
+	}
+	if !now.Before(r.nextBotChatAt) {
+		r.nextBotChatAt = now.Add(botChatMinGap + time.Duration(rand.IntN(int((botChatMaxGap-botChatMinGap)/time.Second)))*time.Second)
+		hasHuman := false
+		for _, p := range r.Players {
+			if !p.IsBot {
+				hasHuman = true
+				break
+			}
+		}
+		if !hasHuman {
+			return // 没有真人观众，bot 闭麦
+		}
+		talkers := make([]*Player, 0, 4)
+		for _, pl := range r.Players {
+			if pl.IsBot && pl.Alive {
+				talkers = append(talkers, pl)
+			}
+		}
+		if len(talkers) == 0 {
+			return
+		}
+		sp := talkers[rand.IntN(len(talkers))]
+		r.Emit(Event{Type: EvChat, Player: sp.Id, Name: sp.Name, Message: botTrashTalk[rand.IntN(len(botTrashTalk))]})
 	}
 }
 
