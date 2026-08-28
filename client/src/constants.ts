@@ -141,8 +141,9 @@ export const PHYS = {
   groundAccel: 44,
   stopAccel: 60,
   airAccel: 9.5,
-  gravity: -22.0,
-  jumpVel: 8.4,
+  // 月球跳：与服务端 sim.go 的 Gravity/JumpVel 保持逐位一致（预测不回弹）
+  gravity: -15.0,
+  jumpVel: 10.5,
   crouchSpeed: 0.6,
   eyeHeight: 1.7,
   crouchEye: 1.12,

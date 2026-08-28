@@ -112,7 +112,8 @@ func TestWebSocketHeartbeatToleratesThrottledBrowserTimers(t *testing.T) {
 }
 
 func TestBalanceValues(t *testing.T) {
-	if RespawnDelayS != 3*time.Second || WalkSpeed != 6.4 || GroundAccel != 44 || StopAccel != 60 || AirAccel != 9.5 || JumpVel != 8.4 || MaxRewindTicks != 8 {
+	// 月球跳（Gravity=-15 / JumpVel=10.5）是有意的平衡变更，见 sim.go 常数注释。
+	if RespawnDelayS != 3*time.Second || WalkSpeed != 6.4 || GroundAccel != 44 || StopAccel != 60 || AirAccel != 9.5 || JumpVel != 10.5 || MaxRewindTicks != 8 {
 		t.Fatalf("unexpected movement balance")
 	}
 	wantDamage := []float64{23, 44, 22, 33, 29, 103, 34, 24, 27, 29, 27, 72, 17}
