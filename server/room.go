@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ type Room struct {
 	Store                 *Store
 	mu                    sync.Mutex
 	running, closed       bool
+	nextHonorReportAt     time.Time
 	Players               []*Player
 	Grenades              []*Grenade
 	Pickups               []Pickup
@@ -112,6 +114,7 @@ func (r *Room) Run() {
 			r.mu.Unlock()
 			return
 		}
+		r.reportHonor(now)
 		for _, p := range r.Players {
 			p.applyQueuedInput()
 		}
@@ -189,6 +192,50 @@ func (r *Room) Run() {
 			log.Printf("room %d: slow tick %v", r.Id, took)
 		}
 	}
+}
+
+// 战场荣誉榜：每 5 分钟一期，播报击杀王与阵亡之王（有真人才发）。
+const honorReportInterval = 5 * time.Minute
+
+func (r *Room) reportHonor(now time.Time) {
+	if len(r.Players) == 0 {
+		return
+	}
+	if r.nextHonorReportAt.IsZero() {
+		r.nextHonorReportAt = now.Add(honorReportInterval)
+		return
+	}
+	if now.Before(r.nextHonorReportAt) {
+		return
+	}
+	r.nextHonorReportAt = now.Add(honorReportInterval)
+	hasHuman := false
+	topKills, topDeaths := r.Players[0], r.Players[0]
+	for _, p := range r.Players {
+		if !p.IsBot {
+			hasHuman = true
+		}
+		if p.Kills > topKills.Kills {
+			topKills = p
+		}
+		if p.Deaths > topDeaths.Deaths {
+			topDeaths = p
+		}
+	}
+	if !hasHuman {
+		return
+	}
+	msg := "🏅 荣誉榜"
+	if topKills.Kills > 0 {
+		msg += fmt.Sprintf("｜击杀王：%s（%d 杀）", topKills.Name, topKills.Kills)
+	}
+	if topDeaths.Deaths > 0 {
+		msg += fmt.Sprintf("｜打工皇帝：%s（%d 阵亡）", topDeaths.Name, topDeaths.Deaths)
+	}
+	if msg == "🏅 荣誉榜" {
+		return
+	}
+	r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报", Message: msg})
 }
 
 func (r *Room) eventsFor(target *Player, evts []Event) []Event {
