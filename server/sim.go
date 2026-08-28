@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"math/rand/v2"
@@ -1191,6 +1192,13 @@ const (
 	chickenWanderR   = 9.0                        // roam radius around home spawn
 	chickenHitHeight = 0.62                       // AABB height for bullet tests
 	chickenHeartbeat = 5 * time.Second            // max age of an idle chicken's last broadcast
+
+	// 鸡雨：定期空投增援小鸡，鸡口缓慢膨胀到上限为止。
+	chickenRainBatch = chickenCount / 2   // 每场鸡雨空投数量
+	chickenRainCap   = chickenCount * 3   // 鸡口上限
+	chickenRainFirst = 75 * time.Second   // 开局到第一场鸡雨
+	chickenRainMin   = 90 * time.Second   // 两场鸡雨最小间隔
+	chickenRainMax   = 150 * time.Second  // 两场鸡雨最大间隔
 )
 
 // Battlefield chickens are the classic CS-style easter egg: harmless voxel
@@ -1213,9 +1221,31 @@ func (r *Room) initChickens() {
 		return
 	}
 	r.Chickens = make([]Chicken, chickenCount)
+	r.nextChickenId = 300 + chickenCount
 	for i := range r.Chickens {
 		r.Chickens[i] = Chicken{Id: uint16(300 + i)}
 		r.respawnChicken(&r.Chickens[i])
+	}
+}
+
+// chickenRain 空投一批增援小鸡。鸡是常驻的（击杀后照常重生），不做回收，
+// 只用 chickenRainCap 限制膨胀；纯 bot 局不播报但照常下雨。
+func (r *Room) chickenRain(now time.Time) {
+	r.nextChickenRainAt = now.Add(chickenRainMin + time.Duration(rand.IntN(int((chickenRainMax-chickenRainMin)/time.Second)))*time.Second)
+	if len(r.Chickens) >= chickenRainCap {
+		return
+	}
+	for range chickenRainBatch {
+		r.Chickens = append(r.Chickens, Chicken{Id: r.nextChickenId})
+		r.nextChickenId++
+		r.respawnChicken(&r.Chickens[len(r.Chickens)-1])
+	}
+	for _, p := range r.Players {
+		if !p.IsBot {
+			r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报",
+				Message: fmt.Sprintf("🐔 鸡雨来了！小鸡增援空投中（当前 %d 只）", len(r.Chickens))})
+			return
+		}
 	}
 }
 
@@ -1267,6 +1297,11 @@ func (r *Room) chickenEvents() []Event {
 func (r *Room) StepChickens(now time.Time) {
 	if len(r.Chickens) == 0 {
 		return
+	}
+	if r.nextChickenRainAt.IsZero() {
+		r.nextChickenRainAt = now.Add(chickenRainFirst)
+	} else if !now.Before(r.nextChickenRainAt) {
+		r.chickenRain(now)
 	}
 	for i := range r.Chickens {
 		c := &r.Chickens[i]
