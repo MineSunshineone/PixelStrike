@@ -22,6 +22,9 @@ type Room struct {
 	botAIs                map[uint16]*BotAI
 	history               map[uint16]*poseHistory
 	teamAttempts          map[uint16]*teamAttempt
+	chickenMobTarget      uint16
+	chickenMobUntil       time.Time
+	nextChickenMobAt      time.Time
 	outboundBuf           []outbound
 	quantizedBuf          []quantState
 }

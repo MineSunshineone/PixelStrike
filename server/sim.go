@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"math/rand/v2"
@@ -1191,6 +1192,13 @@ const (
 	chickenWanderR   = 9.0                        // roam radius around home spawn
 	chickenHitHeight = 0.62                       // AABB height for bullet tests
 	chickenHeartbeat = 5 * time.Second            // max age of an idle chicken's last broadcast
+
+	// 鸡群围观：随机选一名存活真人当「偶像」，全体小鸡涌向他围观一阵。
+	chickenMobFirst    = 150 * time.Second // 开局到第一场围观
+	chickenMobDuration = 12 * time.Second  // 每场围观时长
+	chickenMobMinGap   = 180 * time.Second // 两场围观最小间隔
+	chickenMobMaxGap   = 300 * time.Second // 两场围观最大间隔
+	chickenMobRetry    = 30 * time.Second  // 无真人可围观时重试
 )
 
 // Battlefield chickens are the classic CS-style easter egg: harmless voxel
@@ -1318,6 +1326,98 @@ func (r *Room) StepChickens(now time.Time) {
 			c.lastEmitPos, c.lastEmitAt = c.Pos, now
 		}
 	}
+	r.stepChickenMob(now)
+}
+
+// stepChickenMob 驱动「鸡群围观」：到点随机选一名存活真人当偶像，
+// 全体小鸡把家安到偶像脚下并朝他走（借 wander 机制自然聚拢）；
+// 围观结束就地定居。无真人则改期重试。
+func (r *Room) stepChickenMob(now time.Time) {
+	if len(r.Chickens) == 0 {
+		return
+	}
+	if !r.chickenMobUntil.IsZero() {
+		if now.Before(r.chickenMobUntil) {
+			idol := r.findPlayer(r.chickenMobTarget)
+			if idol != nil && idol.Alive {
+				for i := range r.Chickens {
+					c := &r.Chickens[i]
+					if !c.Alive || now.Before(c.NextTurn) {
+						continue
+					}
+					dx, dz := idol.Pos.X-c.Pos.X, idol.Pos.Z-c.Pos.Z
+					c.Home = Vec3{idol.Pos.X, idol.Pos.Y, idol.Pos.Z}
+					if dx*dx+dz*dz > 0.01 {
+						c.Dir = norm(Vec3{dx, 0, dz})
+					} else {
+						c.Dir = Vec3{} // 已经贴脸：站定仰视
+					}
+					c.NextTurn = now.Add(500 * time.Millisecond)
+				}
+				return
+			}
+			// 偶像阵亡/退出：就地解散
+			r.endChickenMob(now)
+			return
+		}
+		r.endChickenMob(now)
+		return
+	}
+	if r.nextChickenMobAt.IsZero() {
+		r.nextChickenMobAt = now.Add(chickenMobFirst)
+		return
+	}
+	if !now.Before(r.nextChickenMobAt) {
+		idol := r.pickChickenMobIdol()
+		gap := chickenMobMinGap + time.Duration(rand.IntN(int((chickenMobMaxGap-chickenMobMinGap)/time.Second)))*time.Second
+		r.nextChickenMobAt = now.Add(gap)
+		if idol == nil {
+			r.nextChickenMobAt = now.Add(chickenMobRetry)
+			return
+		}
+		r.chickenMobTarget = idol.Id
+		r.chickenMobUntil = now.Add(chickenMobDuration)
+		if r.hasAnyHumanOnline() {
+			r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报",
+				Message: fmt.Sprintf("🎤🐣 小鸡们找到了新偶像：%s！全体围观！", idol.Name)})
+		}
+	}
+}
+
+func (r *Room) endChickenMob(now time.Time) {
+	for i := range r.Chickens {
+		c := &r.Chickens[i]
+		if c.Alive {
+			c.Home = c.Pos // 就地定居
+		}
+	}
+	if r.hasAnyHumanOnline() {
+		r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报", Message: "小鸡围观结束，就地解散定居"})
+	}
+	r.chickenMobUntil = time.Time{}
+	r.chickenMobTarget = 0
+}
+
+func (r *Room) pickChickenMobIdol() *PlayerState {
+	humans := make([]*PlayerState, 0, 4)
+	for _, p := range r.Players {
+		if !p.IsBot && p.Alive {
+			humans = append(humans, &p.PlayerState)
+		}
+	}
+	if len(humans) == 0 {
+		return nil
+	}
+	return humans[rand.IntN(len(humans))]
+}
+
+func (r *Room) hasAnyHumanOnline() bool {
+	for _, p := range r.Players {
+		if !p.IsBot {
+			return true
+		}
+	}
+	return false
 }
 
 // chickenShot tests the pellet ray against every live chicken; the nearest hit
