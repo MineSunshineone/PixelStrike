@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Net, type GameEvent } from './net.js';
 import { WorldView, canOccupy, moveAABB } from './world.js';
 import { LocalPlayer, RemotePlayers } from './player.js';
@@ -38,6 +39,97 @@ scene.add(camera);
 const fillLight = new THREE.DirectionalLight(0x789fb0, 0.5);
 fillLight.position.set(-70, 50, 70);
 scene.add(fillLight);
+
+// ================= 《霓虹之夜》DLC =================
+// 8 分钟昼夜循环：太阳绕场公转、曝光与天色随昼夜起伏；入夜浮现
+// 700 颗星星与建筑霓虹描边（青/紫双色赛博朋克灯带），白昼全部隐去。
+// 纯客户端视觉层：不触碰玩法数据、命中判定与协议。
+const NEON_PERIOD_MS = 480000;
+const NIGHT_BG = new THREE.Color(0x0a1024);
+const DAY_BG = new THREE.Color(0x78939d);
+const NIGHT_FOG = new THREE.Color(0x0d1226);
+const DAY_FOG = new THREE.Color(0x8ea5a8);
+let neonBuiltFor: WorldView | null = null;
+let neonStars: THREE.Points | null = null;
+let neonEdgesCyan: THREE.LineSegments | null = null;
+let neonEdgesMagenta: THREE.LineSegments | null = null;
+
+function buildNeonDecor(worldView: WorldView) {
+  if (neonStars) {
+    scene.remove(neonStars, neonEdgesCyan!, neonEdgesMagenta!);
+    neonStars.geometry.dispose();
+    (neonStars.material as THREE.Material).dispose();
+    for (const seg of [neonEdgesCyan!, neonEdgesMagenta!]) {
+      seg.geometry.dispose();
+      (seg.material as THREE.Material).dispose();
+    }
+  }
+  const starCount = 700;
+  const pos = new Float32Array(starCount * 3);
+  for (let i = 0; i < starCount; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI * 0.42;
+    const r = 380;
+    pos[i * 3] = Math.sin(phi) * Math.cos(theta) * r;
+    pos[i * 3 + 1] = Math.cos(phi) * r * 0.8 + 40;
+    pos[i * 3 + 2] = Math.sin(phi) * Math.sin(theta) * r;
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  neonStars = new THREE.Points(starGeo, new THREE.PointsMaterial({
+    color: 0xcfe4ff, size: 1.6, sizeAttenuation: false,
+    transparent: true, opacity: 0, depthWrite: false, fog: false,
+  }));
+  neonStars.frustumCulled = false;
+
+  const cyanGeos: THREE.BufferGeometry[] = [];
+  const magentaGeos: THREE.BufferGeometry[] = [];
+  worldView.boxes.forEach((b, i) => {
+    const w = b.x1 - b.x0, h = b.y1 - b.y0, d = b.z1 - b.z0;
+    if (w <= 0.01 || h <= 0.01 || d <= 0.01) return;
+    const g = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d));
+    g.translate((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2);
+    (i % 2 === 0 ? cyanGeos : magentaGeos).push(g);
+  });
+  const edgeMat = (color: number) => new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0, fog: false });
+  neonEdgesCyan = cyanGeos.length ? new THREE.LineSegments(mergeGeometries(cyanGeos)!, edgeMat(0x3de1ff)) : null;
+  neonEdgesMagenta = magentaGeos.length ? new THREE.LineSegments(mergeGeometries(magentaGeos)!, edgeMat(0xff4dd2)) : null;
+  for (const seg of [neonEdgesCyan, neonEdgesMagenta]) {
+    if (seg) {
+      seg.frustumCulled = false;
+      scene.add(seg);
+    }
+  }
+  scene.add(neonStars);
+}
+
+function updateNeonNight(t: number) {
+  if (world !== neonBuiltFor) {
+    neonBuiltFor = world;
+    if (world) buildNeonDecor(world);
+    else return;
+  }
+  if (!neonStars || !neonEdgesCyan || !neonEdgesMagenta) return;
+
+  const phase = (t % NEON_PERIOD_MS) / NEON_PERIOD_MS;
+  const dayFactor = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2); // 1=正午 0=午夜
+  const night = 1 - dayFactor;
+
+  // 太阳绕场公转（夜里沉到地平线下，由低强度月光补位）
+  const ang = phase * Math.PI * 2;
+  sun.position.set(Math.cos(ang) * 90, Math.max(20, Math.sin(ang) * 120), -70);
+  sun.intensity = 0.16 + dayFactor * 1.06;
+  hemiLight.intensity = 0.28 + dayFactor * 0.94;
+  fillLight.intensity = 0.2 + dayFactor * 0.3;
+  fillLight.color.setRGB(0.32, 0.5 + dayFactor * 0.12, 0.9);
+  renderer.toneMappingExposure = 0.7 + dayFactor * 0.37;
+  (scene.background as THREE.Color).copy(DAY_BG).lerp(NIGHT_BG, night);
+  (scene.fog as THREE.Fog).color.copy(DAY_FOG).lerp(NIGHT_FOG, night);
+
+  (neonStars.material as THREE.PointsMaterial).opacity = night * 0.95;
+  (neonEdgesCyan.material as THREE.LineBasicMaterial).opacity = night * 0.85;
+  (neonEdgesMagenta.material as THREE.LineBasicMaterial).opacity = night * 0.85;
+}
 const hud = new Hud();
 const audio = new AudioEngine();
 window.addEventListener('pointerdown', () => audio.init(), { once: true, capture: true });
@@ -1766,6 +1858,7 @@ function frame(t: number) {
     remotes.update(t);
     particles.update(dt, t, world);
     world?.animate(t);
+    updateNeonNight(t);
     weapons.syncFrom(camera);
     renderer.render(scene, camera);
     if (alive) weapons.renderOverlay(renderer, scene);
