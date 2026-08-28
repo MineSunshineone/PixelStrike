@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"math/rand/v2"
@@ -690,6 +691,7 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 		}
 		r.applyStreakReward(attacker, now)
 	}
+	r.announceKillfeedMemes(attacker, victim)
 	victim.Streak = 0
 	victim.UltimatePoints, victim.Ultimate = 0, 0
 	victim.BlackDreamUntil, victim.InvincibleUntilUlt, victim.GhostUntil = time.Time{}, time.Time{}, time.Time{}
@@ -734,6 +736,67 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	victim.RevengeActive, victim.RevengeShots = false, 0
 	victim.InvincibleUntil = time.Time{}
 	victim.RespawnAt = now.Add(RespawnDelayS)
+}
+
+// 连杀梗播报：服务端以「战场播报」身份走 EvChat 通道整活。
+// 仅当房间里有真人时才播，避免无人局被 bot 内战刷屏。
+var killstreakLines = map[uint8][]string{
+	3: {
+		"%s 三连杀！建议对手集体申请工伤",
+		"%s 三连杀达成，枪管正在冒烟，请勿触摸",
+		"警告：%s 已三连杀，对手的头部保险即将到期",
+	},
+	5: {
+		"%s 五连杀！这已经不是枪法了，是因果律武器",
+		"%s 五连杀达成，正在考虑要不要收手（不会）",
+		"战况通报：%s 五连杀，正朝主播方向发展",
+	},
+	8: {
+		"%s 八连杀！建议全体玩家原地表演一个投降",
+		"%s 八连杀！队友已经开始截图留念",
+	},
+	10: {
+		"%s 十连杀！战场已变成个人直播间",
+		"%s 十连杀！服务端递上一杯冰可乐",
+		"讣告（对手方）：请为 %s 的十连杀默哀三秒",
+	},
+}
+
+var deathStreakLines = []string{
+	"%s 已连死五次，正在申请工伤认定",
+	"%s 连死五次，出生点的地板都认得 TA 了",
+	"%s 已连死五次！鼓励一下：起码贡献了别人的击杀数",
+}
+
+// deathStreakMemeAt：连续死亡达到该次数时发一条安慰播报（NoKillDeaths 会在
+// RevengeDeathThreshold 次时清零，所以选一个小于它的值）。
+const deathStreakMemeAt uint8 = 5
+
+func (r *Room) hasHuman() bool {
+	for _, p := range r.Players {
+		if !p.IsBot {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Room) broadcastChat(name, message string) {
+	r.Emit(Event{Type: EvChat, Player: 0, Name: name, Message: message})
+}
+
+func (r *Room) announceKillfeedMemes(attacker, victim *PlayerState) {
+	if !r.hasHuman() {
+		return
+	}
+	if attacker.Id != victim.Id {
+		if lines := killstreakLines[attacker.Streak]; len(lines) > 0 {
+			r.broadcastChat("战场播报", fmt.Sprintf(lines[rand.IntN(len(lines))], attacker.Name))
+		}
+	}
+	if !victim.IsBot && victim.NoKillDeaths == deathStreakMemeAt {
+		r.broadcastChat("战场播报", fmt.Sprintf(deathStreakLines[rand.IntN(len(deathStreakLines))], victim.Name))
+	}
 }
 
 func (p *PlayerState) streakScale() int {
