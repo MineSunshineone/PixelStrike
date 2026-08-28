@@ -17,6 +17,33 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x78939d);
 scene.fog = new THREE.Fog(0x8ea5a8, 52, 265);
 
+// 雾袭：每隔 75-120 秒随机来一场 18 秒的浓雾（能见度 265m → 60m），
+// 指数平滑过渡进出。只动雾距（near/far），雾色归灯光系统管，互不干扰。
+const FOG_NORMAL_NEAR = 52, FOG_NORMAL_FAR = 265;
+const FOG_ATTACK_NEAR = 8, FOG_ATTACK_FAR = 60;
+const FOG_ATTACK_DURATION = 18000;
+let fogAttackUntil = 0;
+let nextFogAttackAt = 0;
+
+function updateFogAttack(t: number, dt: number) {
+  const fog = scene.fog as THREE.Fog;
+  if (nextFogAttackAt === 0) {
+    nextFogAttackAt = t + 60000 + Math.random() * 60000;
+    return;
+  }
+  const attacking = t < fogAttackUntil;
+  if (!attacking && t >= nextFogAttackAt) {
+    fogAttackUntil = t + FOG_ATTACK_DURATION;
+    nextFogAttackAt = t + FOG_ATTACK_DURATION + 57000 + Math.random() * 45000;
+    hud.addChatMessage('战场气象台', '🌫 雾袭来了！能见度骤降，注意听声辨位', false);
+  }
+  const targetNear = attacking ? FOG_ATTACK_NEAR : FOG_NORMAL_NEAR;
+  const targetFar = attacking ? FOG_ATTACK_FAR : FOG_NORMAL_FAR;
+  const k = 1 - Math.exp(-dt * 2.5);
+  fog.near += (targetNear - fog.near) * k;
+  fog.far += (targetFar - fog.far) * k;
+}
+
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 450);
 camera.rotation.order = 'YXZ';
 camera.layers.enable(0);
@@ -1604,6 +1631,7 @@ function frame(t: number) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (t - prev) / 1000);
   prev = t;
+  updateFogAttack(t, dt);
   if (document.hidden) return;
 
   if (joined && alive) {
