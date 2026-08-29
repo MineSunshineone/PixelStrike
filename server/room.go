@@ -16,6 +16,7 @@ type Room struct {
 	Grenades              []*Grenade
 	Pickups               []Pickup
 	Chickens              []Chicken
+	bountyOf              map[uint16]uint16
 	nextNadeId, nextIdSeq uint16
 	tick                  uint32
 	pending               []Event
@@ -43,6 +44,9 @@ func NewRoom(id int, w *World, s *Store) *Room {
 }
 
 func (r *Room) Remove(p *Player) {
+	if r.bountyOf != nil {
+		delete(r.bountyOf, p.PlayerState.Id) // 退出房间带走悬赏
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Clear bond: if this player had a bond mate, break the bond
