@@ -90,10 +90,14 @@ const (
 	UltimateBlackDream  = 1
 	UltimateInvincible  = 2
 	UltimateGhost       = 3
+	UltimateThorns      = 4
+	UltimateVampire     = 5
+	UltimateRampage     = 6
 
 	UltimateBlackDreamS = 10 * time.Second
 	UltimateInvincibleS = 15 * time.Second
 	UltimateGhostS      = 10 * time.Second
+	UltimateAwakenS     = 10 * time.Second // 觉醒系大招统一时长
 
 	GhostSpeedMultiplier = 1.45
 	chatCooldown         = time.Second
@@ -140,6 +144,9 @@ type PlayerState struct {
 	LastShotAt                                                     time.Time
 	NextChatAt                                                     time.Time
 	ShotCounter                                                    uint8
+	ThornsUntil                                                    time.Time
+	LifestealUntil                                                 time.Time
+	RampageUntil                                                   time.Time
 	inputWindowStart                                               time.Time
 	inputCount                                                     int
 }
@@ -270,6 +277,21 @@ func (r *Room) Step(now time.Time) {
 					p.Ultimate = 0
 					r.Emit(Event{Type: EvUltimate, Player: p.Id, Kind: UltimateGhost})
 				}
+			case UltimateThorns:
+				if !p.ThornsUntil.After(now) {
+					p.Ultimate = 0
+					r.Emit(Event{Type: EvUltimate, Player: p.Id, Kind: UltimateThorns})
+				}
+			case UltimateVampire:
+				if !p.LifestealUntil.After(now) {
+					p.Ultimate = 0
+					r.Emit(Event{Type: EvUltimate, Player: p.Id, Kind: UltimateVampire})
+				}
+			case UltimateRampage:
+				if !p.RampageUntil.After(now) {
+					p.Ultimate = 0
+					r.Emit(Event{Type: EvUltimate, Player: p.Id, Kind: UltimateRampage})
+				}
 			default:
 				p.Ultimate = 0
 			}
@@ -326,6 +348,9 @@ func (r *Room) Move(p *PlayerState, now time.Time) {
 	speed := WalkSpeed * Weapons[min(int(p.Weapon), len(Weapons)-1)].SpeedMult
 	if p.GhostAt(now) {
 		speed *= GhostSpeedMultiplier
+	}
+	if p.RampageUntil.After(now) {
+		speed *= 1.3 // 狂暴：移速加成
 	}
 	if now.Before(p.SpeedUntil) {
 		speed *= p.streakSpeedMul()
@@ -415,6 +440,9 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 		p.setActiveAmmo(mag-1, reserve)
 	}
 	gap := time.Duration(60 / def.Rpm * float64(time.Second))
+	if p.RampageUntil.After(now) {
+		gap /= 2 // 狂暴：射速 ×2
+	}
 	if weapon == 6 {
 		gap = KnifeSlashInterval
 		if mode&1 != 0 {
@@ -658,6 +686,16 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	}
 	d := uint8(math.Max(1, math.Min(actual, float64(victim.HP))))
 	victim.HP -= d
+	// 荆棘甲：受击反伤 30%，递归闸防止双方互反弹无限循环。
+	if victim.ThornsUntil.After(now) && attacker.Id != victim.Id && !r.reflecting {
+		r.reflecting = true
+		r.Damage(victim, attacker, dmg*0.3, false, 6, now)
+		r.reflecting = false
+	}
+	// 吸血：造成伤害回复一半（向下取整）。
+	if attacker.LifestealUntil.After(now) && attacker.Id != victim.Id {
+		attacker.HP = uint8(min(MaxHP, int(attacker.HP)+int(d)/2))
+	}
 	hs := uint8(0)
 	if headshot {
 		hs = 1
@@ -694,6 +732,7 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	victim.UltimatePoints, victim.Ultimate = 0, 0
 	victim.BlackDreamUntil, victim.InvincibleUntilUlt, victim.GhostUntil = time.Time{}, time.Time{}, time.Time{}
 	victim.DmgUntil, victim.RecoilUntil, victim.SpeedUntil = time.Time{}, time.Time{}, time.Time{}
+	victim.ThornsUntil, victim.LifestealUntil, victim.RampageUntil = time.Time{}, time.Time{}, time.Time{}
 	if !attacker.IsBot {
 		r.Store.Accumulate(attacker.Account, 1, 0)
 		if !victim.IsBot && isGun(weapon) {
@@ -909,7 +948,7 @@ func (r *Room) applyStreakReward(p *PlayerState, now time.Time) {
 }
 
 func (r *Room) CastUltimate(p *PlayerState, kind uint8, now time.Time) bool {
-	if !p.Alive || kind < UltimateBlackDream || kind > UltimateGhost {
+	if !p.Alive || kind < UltimateBlackDream || kind > UltimateRampage {
 		return false
 	}
 	if p.UltimatePoints < UltimateRequirement || p.Ultimate != 0 {
@@ -926,6 +965,15 @@ func (r *Room) CastUltimate(p *PlayerState, kind uint8, now time.Time) bool {
 	case UltimateGhost:
 		duration = UltimateGhostS
 		p.GhostUntil = now.Add(duration)
+	case UltimateThorns:
+		duration = UltimateAwakenS
+		p.ThornsUntil = now.Add(duration)
+	case UltimateVampire:
+		duration = UltimateAwakenS
+		p.LifestealUntil = now.Add(duration)
+	case UltimateRampage:
+		duration = UltimateAwakenS
+		p.RampageUntil = now.Add(duration)
 	}
 	p.Ultimate = kind
 	p.UltimatePoints = 0

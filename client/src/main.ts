@@ -488,8 +488,8 @@ window.addEventListener('keydown', (e) => {
   if (!alive) return;
   keys.add(e.code);
   if (e.repeat) return;
-  if (/^Key(?:Z|X|V)$/.test(e.code)) {
-    const kind = e.code === 'KeyZ' ? 1 : e.code === 'KeyX' ? 2 : 3;
+  if (/^Key(?:Z|X|V|C|B|N)$/.test(e.code)) {
+    const kind = e.code === 'KeyZ' ? 1 : e.code === 'KeyX' ? 2 : e.code === 'KeyV' ? 3 : e.code === 'KeyC' ? 4 : e.code === 'KeyB' ? 5 : 6;
     if (ultimatePoints >= ULTIMATE_REQUIREMENT) {
       net.castUltimate(kind);
       hud.toggleUltimateSelector(false);

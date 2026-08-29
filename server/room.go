@@ -17,6 +17,7 @@ type Room struct {
 	Pickups               []Pickup
 	Chickens              []Chicken
 	nextNadeId, nextIdSeq uint16
+	reflecting            bool
 	tick                  uint32
 	pending               []Event
 	botAIs                map[uint16]*BotAI

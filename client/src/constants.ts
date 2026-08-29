@@ -122,6 +122,9 @@ export const ULTIMATES = [
   { id: 1, key: 'Z', name: '黑梦', durationMs: 10000, description: '真人视线变黑，bot 停火 10 秒' },
   { id: 2, key: 'X', name: '无敌', durationMs: 15000, description: '不受任何伤害 15 秒' },
   { id: 3, key: 'V', name: '幽灵', durationMs: 10000, description: '隐身并提速 10 秒，弹道仍会暴露位置' },
+  { id: 4, key: 'C', name: '荆棘甲', durationMs: 10000, description: '受击反弹 30% 伤害 10 秒' },
+  { id: 5, key: 'B', name: '吸血', durationMs: 10000, description: '造成伤害回复一半 10 秒' },
+  { id: 6, key: 'N', name: '狂暴', durationMs: 10000, description: '射速 ×2、移速 +30% 共 10 秒' },
 ] as const;
 export const scopeSettleMs = (id: number) => id === 5 ? 320 : id === 11 ? 240 : 0;
 
