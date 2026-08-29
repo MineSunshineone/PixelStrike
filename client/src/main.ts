@@ -1277,6 +1277,58 @@ net.onEvents = (events) => {
   for (const e of events) handleEvent(e);
 };
 
+// ============ 《空投战争》DLC：运输机飞行动画 ============
+// 传奇补给落地瞬间，一架运输机从天际掠过箱位上空（纯视觉，3.5 秒）。
+let airdropPlane: THREE.Group | null = null;
+let airdropPlaneFrom: THREE.Vector3 | null = null;
+let airdropPlaneTo: THREE.Vector3 | null = null;
+let airdropPlaneStart = 0;
+
+function spawnAirdropPlane(origin: number[]) {
+  if (airdropPlane) scene.remove(airdropPlane);
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 1.2, 6),
+    new THREE.MeshLambertMaterial({ color: 0x4a5568 }),
+  );
+  const wing = new THREE.Mesh(
+    new THREE.BoxGeometry(9, 0.25, 1.4),
+    new THREE.MeshLambertMaterial({ color: 0x3a4354 }),
+  );
+  const tail = new THREE.Mesh(
+    new THREE.BoxGeometry(0.25, 1.6, 1.2),
+    new THREE.MeshLambertMaterial({ color: 0x3a4354 }),
+  );
+  tail.position.set(0, 0.8, 2.6);
+  g.add(body, wing, tail);
+  const tx = origin[0], tz = origin[2];
+  airdropPlaneFrom = new THREE.Vector3(tx - 120, 70, tz - 90);
+  airdropPlaneTo = new THREE.Vector3(tx + 120, 62, tz + 90);
+  g.position.copy(airdropPlaneFrom);
+  g.lookAt(airdropPlaneTo);
+  airdropPlane = g;
+  airdropPlaneStart = performance.now();
+  scene.add(g);
+}
+
+function updateAirdropPlane(t: number) {
+  if (!airdropPlane || !airdropPlaneFrom || !airdropPlaneTo) return;
+  const k = (t - airdropPlaneStart) / 3500;
+  if (k >= 1) {
+    scene.remove(airdropPlane);
+    airdropPlane.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+      }
+    });
+    airdropPlane = null;
+    return;
+  }
+  airdropPlane.position.lerpVectors(airdropPlaneFrom, airdropPlaneTo, k);
+}
+
 function handleEvent(e: GameEvent) {
   if (e.type === 17) {
     hud.addChatMessage(e.name ?? nameOf(e.player), e.message ?? '', e.player === net.yourId);
@@ -1491,6 +1543,7 @@ function handleEvent(e: GameEvent) {
   if (e.type === 10 && e.pickup !== undefined && e.kind !== undefined && e.origin) {
     pickupStates.set(e.pickup, { kind: e.kind, origin: e.origin });
     world?.setPickup(e.pickup, e.kind, ...e.origin);
+    if (e.kind === 3) spawnAirdropPlane(e.origin);
     return;
   }
   if (e.type === 11 && e.pickup !== undefined) {
@@ -1605,6 +1658,7 @@ function frame(t: number) {
   const dt = Math.min(0.05, (t - prev) / 1000);
   prev = t;
   if (document.hidden) return;
+  updateAirdropPlane(t);
 
   if (joined && alive) {
     local.speedMultiplier = (t < speedBoostUntil ? SPEED_BOOST_MULTIPLIER : 1) * (ultimateKind === 3 && t < ultimateUntil ? 1.45 : 1);

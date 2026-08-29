@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"math/rand/v2"
@@ -284,6 +285,7 @@ func (r *Room) Step(now time.Time) {
 		r.CheckSanity(p)
 	}
 	r.StepPickups(now)
+	r.stepAirdrops(now)
 	r.StepChickens(now)
 	r.recordHistory()
 }
@@ -1054,6 +1056,7 @@ const (
 	PickupAmmo uint8 = iota
 	PickupHealth
 	PickupSpeed
+	PickupAirdrop
 	pickupCount = 12
 )
 
@@ -1144,6 +1147,17 @@ func (r *Room) StepPickups(now time.Time) {
 			}
 			pickup.Active = false
 			pickup.RespawnAt = now.Add(time.Duration(8+rand.IntN(5)) * time.Second)
+			if pickup.Kind == PickupAirdrop {
+				// 传奇补给被抢：额外 +2 大招点 + 全房播报；空投箱不进入常规重生轮换。
+				pickup.RespawnAt = now.Add(100 * 365 * 24 * time.Hour)
+				if p.Ultimate == 0 {
+					p.UltimatePoints = uint8(min(UltimateRequirement, int(p.UltimatePoints)+2))
+				}
+				if r.hasAirdropAudience() {
+					r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报",
+						Message: fmt.Sprintf("🏆 %s 抢到了传奇补给：满血 + 满甲 + 弹药全满 +2 大招点！", p.Name)})
+				}
+			}
 			ms := uint16(0)
 			if pickup.Kind == PickupSpeed {
 				ms = uint16(speedBoostDuration / time.Millisecond)
@@ -1171,6 +1185,14 @@ func applyPickup(p *PlayerState, kind uint8, now time.Time) bool {
 		p.HP = uint8(min(MaxHP, int(p.HP)+50))
 	case PickupSpeed:
 		p.SpeedUntil = now.Add(speedBoostDuration)
+	case PickupAirdrop:
+		// 传奇补给：满血满甲弹药全满（大招点奖励由 StepPickups 结算时发放）。
+		p.HP = MaxHP
+		p.Armor = 100
+		primary, secondary := Weapons[p.Primary], Weapons[p.Secondary]
+		p.Mags = [2]int{primary.Mag, secondary.Mag}
+		p.Reserves = [2]int{primary.Reserve, secondary.Reserve}
+		p.Reloading, p.ReloadEnd, p.NextFire = false, time.Time{}, now
 	default:
 		return false
 	}

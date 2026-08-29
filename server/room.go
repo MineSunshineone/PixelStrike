@@ -17,6 +17,9 @@ type Room struct {
 	Pickups               []Pickup
 	Chickens              []Chicken
 	nextNadeId, nextIdSeq uint16
+	nextAirdropAt         time.Time
+	airdropSeq            uint16
+	airdropDeadlines      []airdropDeadline
 	tick                  uint32
 	pending               []Event
 	botAIs                map[uint16]*BotAI

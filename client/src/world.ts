@@ -412,7 +412,7 @@ export class WorldView {
   boxes: { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number }[] = [];
   constructor(scene: THREE.Scene, map: MapData) {
     this.scene = scene;
-    this.pickupTemplates = [this.createPickup(0), this.createPickup(1), this.createPickup(2)];
+    this.pickupTemplates = [this.createPickup(0), this.createPickup(1), this.createPickup(2), this.createPickup(3)];
     this.chickenTemplate = this.createChicken();
 
     // 1. Build Repeating-UV High-Definition Voxel Map with Merged Geometries per Material
@@ -471,8 +471,8 @@ export class WorldView {
 
   private createPickup(kind: number): THREE.Group {
     const group = new THREE.Group();
-    const colors = [0xe4a94a, 0xd94c4c, 0x35c9e8];
-    const color = colors[kind];
+    const colors = [0xe4a94a, 0xd94c4c, 0x35c9e8, 0xffd54a];
+    const color = colors[kind] ?? colors[0];
     const core = new THREE.Mesh(
       new THREE.BoxGeometry(0.52, 0.36, 0.52),
       new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.75 }),
@@ -481,6 +481,22 @@ export class WorldView {
       new THREE.SphereGeometry(0.68, 12, 8),
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending }),
     );
+    if (kind === 3) {
+      // 传奇空投箱：大一号的金色货箱 + 降落伞
+      const crate = new THREE.Mesh(
+        new THREE.BoxGeometry(0.7, 0.5, 0.7),
+        new THREE.MeshLambertMaterial({ color: 0xffd54a, emissive: 0xffd54a, emissiveIntensity: 0.5 }),
+      );
+      const strapMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.52, 0.12), strapMat);
+      const chute = new THREE.Mesh(
+        new THREE.SphereGeometry(0.9, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshLambertMaterial({ color: 0xf5f2df, side: THREE.DoubleSide }),
+      );
+      chute.position.y = 1.1;
+      group.add(crate, strap, chute);
+      return group;
+    }
     group.add(core, glow);
     const markerMat = new THREE.MeshBasicMaterial({ color: 0xf5f2df });
     if (kind === 0) {
