@@ -17,6 +17,12 @@ type Room struct {
 	Pickups               []Pickup
 	Chickens              []Chicken
 	nextNadeId, nextIdSeq uint16
+	stormNextAt           time.Time
+	stormEndsAt           time.Time
+	stormNextStrikeAt     time.Time
+	stormStrikePos        Vec3
+	stormStrikesLeft      int
+	stormKind             uint8
 	tick                  uint32
 	pending               []Event
 	botAIs                map[uint16]*BotAI
