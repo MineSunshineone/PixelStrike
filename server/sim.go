@@ -285,6 +285,7 @@ func (r *Room) Step(now time.Time) {
 	}
 	r.StepPickups(now)
 	r.StepChickens(now)
+	r.stepZones()
 	r.recordHistory()
 }
 

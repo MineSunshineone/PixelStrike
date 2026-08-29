@@ -16,6 +16,8 @@ type Room struct {
 	Grenades              []*Grenade
 	Pickups               []Pickup
 	Chickens              []Chicken
+	zoneOwners            [3]uint16
+	zoneHoldTicks         [3]int
 	nextNadeId, nextIdSeq uint16
 	tick                  uint32
 	pending               []Event
