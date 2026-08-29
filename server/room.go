@@ -16,6 +16,11 @@ type Room struct {
 	Grenades              []*Grenade
 	Pickups               []Pickup
 	Chickens              []Chicken
+	Zombies               []Zombie
+	bloodMoonUntil        time.Time
+	nextBloodMoonAt       time.Time
+	nextZombieId          uint16
+	zombieWave            uint16
 	nextNadeId, nextIdSeq uint16
 	tick                  uint32
 	pending               []Event
@@ -213,6 +218,10 @@ func (r *Room) eventsFor(target *Player, evts []Event) []Event {
 		case EvChickenSpawn:
 			send = horizontalWithin(target.Pos, e.Origin, 120)
 		case EvChickenDeath:
+			send = true
+		case EvZombieSpawn:
+			send = horizontalWithin(target.Pos, e.Origin, 120)
+		case EvZombieDeath:
 			send = true
 		case EvReloadStart:
 			if e.Player == target.Id {

@@ -12,6 +12,8 @@ import bundledMap from '../../map.json';
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsUrl = import.meta.env.VITE_WS_URL || `${proto}//${location.host}/ws`;
 const mapSize = (bundledMap as MapData).size;
+const DAY_BG_REF = new THREE.Color(0x78939d);
+let dayBgDirty = false;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x78939d);
@@ -1277,6 +1279,46 @@ net.onEvents = (events) => {
   for (const e of events) handleEvent(e);
 };
 
+// ============ 《血月围城》DLC：僵尸渲染 ============
+// 每只僵尸一个小型 Group（暗红身躯 + 猩红双眼），事件驱动移动/移除。
+const zombieMeshes = new Map<number, THREE.Group>();
+let zombiesAlive = 0;
+const BLOOD_MOON_BG = new THREE.Color(0x401418);
+
+function zombieFor(id: number): THREE.Group {
+  let g = zombieMeshes.get(id);
+  if (g) return g;
+  g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.7, 1.7, 0.7),
+    new THREE.MeshBasicMaterial({ color: 0x571414 }),
+  );
+  body.position.y = 0.85;
+  const eyes = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.12, 0.06),
+    new THREE.MeshBasicMaterial({ color: 0xff2a2a }),
+  );
+  eyes.position.set(0, 1.45, -0.36);
+  g.add(body, eyes);
+  scene.add(g);
+  zombieMeshes.set(id, g);
+  return g;
+}
+
+function removeZombie(id: number) {
+  const g = zombieMeshes.get(id);
+  if (!g) return;
+  g.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) {
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+  });
+  scene.remove(g);
+  zombieMeshes.delete(id);
+}
+
 function handleEvent(e: GameEvent) {
   if (e.type === 17) {
     hud.addChatMessage(e.name ?? nameOf(e.player), e.message ?? '', e.player === net.yourId);
@@ -1517,6 +1559,22 @@ function handleEvent(e: GameEvent) {
     if (e.kind === 1) hud.showFlightAnnouncement(e.name || nameOf(e.player));
     return;
   }
+  if (e.type === 20 && e.chicken !== undefined && e.origin) {
+    // EvZombieSpawn：创建/移动僵尸（移动事件会重复到达，按 ID 去重计数）
+    if (!zombieMeshes.has(e.chicken)) zombiesAlive++;
+    zombieFor(e.chicken).position.set(e.origin[0], e.origin[1], e.origin[2]);
+    return;
+  }
+  if (e.type === 21 && e.chicken !== undefined) {
+    // EvZombieDeath：灰烬粒子 + 移除 + 战报（Killer=0 表示晨光净化）
+    zombiesAlive = Math.max(0, zombiesAlive - 1);
+    if (e.origin) particles.spawnImpact(eventOrigin.set(e.origin[0], e.origin[1] + 0.9, e.origin[2]), impactNormal, 0x8a1d1d, 14);
+    removeZombie(e.chicken);
+    const killerName = e.killer === 0 ? '晨光' : nameOf(e.killer);
+    hud.killFeedEntry(killerName, '血月僵尸', e.weapon ?? 6, false, e.killer === net.yourId);
+    if (e.killer === net.yourId) audio.play('kill_confirm', 0.7, 0.9, 0, true);
+    return;
+  }
   if (e.type === 18 && e.chicken !== undefined && e.origin) {
     world?.setChicken(e.chicken, e.origin[0], e.origin[1], e.origin[2], e.dir?.[0] ?? 0, e.dir?.[2] ?? 0);
     return;
@@ -1605,6 +1663,14 @@ function frame(t: number) {
   const dt = Math.min(0.05, (t - prev) / 1000);
   prev = t;
   if (document.hidden) return;
+  // 血月染天：场上有僵尸时天色向血红渐变，清场后缓慢恢复
+  if (zombiesAlive > 0) {
+    (scene.background as THREE.Color).lerp(BLOOD_MOON_BG, Math.min(0.03, 0.004 * zombiesAlive));
+    dayBgDirty = true;
+  } else if (dayBgDirty) {
+    (scene.background as THREE.Color).lerp(DAY_BG_REF, 0.02);
+    if (Math.abs((scene.background as THREE.Color).getHex() - DAY_BG_REF.getHex()) < 40) dayBgDirty = false;
+  }
 
   if (joined && alive) {
     local.speedMultiplier = (t < speedBoostUntil ? SPEED_BOOST_MULTIPLIER : 1) * (ultimateKind === 3 && t < ultimateUntil ? 1.45 : 1);
