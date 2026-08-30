@@ -7,23 +7,26 @@ import (
 )
 
 type Room struct {
-	Id                    int
-	World                 *World
-	Store                 *Store
-	mu                    sync.Mutex
-	running, closed       bool
-	Players               []*Player
-	Grenades              []*Grenade
-	Pickups               []Pickup
-	Chickens              []Chicken
-	nextNadeId, nextIdSeq uint16
-	tick                  uint32
-	pending               []Event
-	botAIs                map[uint16]*BotAI
-	history               map[uint16]*poseHistory
-	teamAttempts          map[uint16]*teamAttempt
-	outboundBuf           []outbound
-	quantizedBuf          []quantState
+	Id                            int
+	World                         *World
+	Store                         *Store
+	mu                            sync.Mutex
+	running, closed               bool
+	Players                       []*Player
+	Grenades                      []*Grenade
+	Pickups                       []Pickup
+	Chickens                      []Chicken
+	Wormholes                     [2]Vec3
+	wormholeOK, wormholeAnnounced bool
+	wormholeCooldowns             map[uint16]time.Time
+	nextNadeId, nextIdSeq         uint16
+	tick                          uint32
+	pending                       []Event
+	botAIs                        map[uint16]*BotAI
+	history                       map[uint16]*poseHistory
+	teamAttempts                  map[uint16]*teamAttempt
+	outboundBuf                   []outbound
+	quantizedBuf                  []quantState
 }
 
 // teamAttempt tracks the consecutive crouch taps of one human for illegal teaming.
@@ -39,6 +42,7 @@ func NewRoom(id int, w *World, s *Store) *Room {
 	r := &Room{Id: id, World: w, Store: s, nextIdSeq: 1, botAIs: make(map[uint16]*BotAI), history: make(map[uint16]*poseHistory), teamAttempts: make(map[uint16]*teamAttempt)}
 	r.initPickups()
 	r.initChickens()
+	r.initWormholes()
 	return r
 }
 
@@ -61,6 +65,7 @@ func (r *Room) Remove(p *Player) {
 	}
 	delete(r.botAIs, p.Id)
 	delete(r.history, p.Id)
+	delete(r.wormholeCooldowns, p.Id)
 	for _, other := range r.Players {
 		delete(other.netCache, p.Id)
 		delete(other.netFullAt, p.Id)
@@ -71,6 +76,7 @@ func (r *Room) Remove(p *Player) {
 		r.history = make(map[uint16]*poseHistory)
 		r.Grenades, r.Pickups, r.pending = nil, nil, nil
 		r.Chickens = nil
+		r.wormholeCooldowns = nil
 		return
 	}
 	r.Emit(Event{Type: EvPlayerLeave, Player: p.Id})
