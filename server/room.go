@@ -21,6 +21,7 @@ type Room struct {
 	tick                  uint32
 	pending               []Event
 	botAIs                map[uint16]*BotAI
+	nextBotChatAt         time.Time
 	history               map[uint16]*poseHistory
 	teamAttempts          map[uint16]*teamAttempt
 	outboundBuf           []outbound
