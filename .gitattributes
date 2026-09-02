@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+map.json text eol=lf
+maps/*.json text eol=lf

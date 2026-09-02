@@ -14,7 +14,7 @@ import neonCityMap from '../../maps/neon-city.json';
 // 《霓虹都会》DLC：服务端 Welcome 帧携带 mapRevision（地图文件 sha256 前 4 字节 LE）。
 // 客户端按 revision 选择已内置的地图数据；对不上则回落主地图。
 // 该常量由 tools/genmap-neon.mjs 生成时打印，服务端测试会交叉校验两端一致。
-const NEON_CITY_REVISION = 0x3a6b5b4d;
+const NEON_CITY_REVISION = 0x41ea17e1;
 const pickMapData = (revision: number): MapData => (revision === NEON_CITY_REVISION ? (neonCityMap as MapData) : (bundledMap as MapData));
 
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
