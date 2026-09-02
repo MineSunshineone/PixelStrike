@@ -1281,6 +1281,14 @@ const (
 	chickenMobMinGap   = 180 * time.Second // 两场围观最小间隔
 	chickenMobMaxGap   = 300 * time.Second // 两场围观最大间隔
 	chickenMobRetry    = 30 * time.Second  // 无真人可围观时重试
+
+	// 《鸡鸡帝国》DLC：金鸡王混入鸡群，护卫队暴露位置，击杀掉超级补给。
+	kingFirstAt    = 3 * time.Minute // 开局到首位金鸡王
+	kingRespawnMin = 4 * time.Minute // 王驾崩后到下一位的最短间隔
+	kingRespawnMax = 6 * time.Minute // 最长间隔
+	kingRetry      = 30 * time.Second
+	kingHP         = 600
+	kingGuardCount = 2
 )
 
 // Battlefield chickens are the classic CS-style easter egg: harmless voxel
@@ -1291,6 +1299,8 @@ type Chicken struct {
 	Pos         Vec3
 	Dir         Vec3 // horizontal heading; zero means idling in place
 	Alive       bool
+	King        bool   // 金鸡王：多枪才能击杀，击杀掉超级补给
+	KingHP      uint16 // 王的血量（仅 King=true 时有效）
 	NextTurn    time.Time
 	RespawnAt   time.Time
 	lastEmitPos Vec3
@@ -1336,6 +1346,8 @@ func (r *Room) respawnChicken(c *Chicken) {
 	c.Pos = c.Home
 	c.Dir = Vec3{}
 	c.Alive = true
+	c.King = false
+	c.KingHP = 0
 	c.NextTurn = time.Time{}
 	c.forceEmit = true
 	r.Emit(Event{Type: EvChickenSpawn, Player: c.Id, Origin: c.Pos})
@@ -1385,6 +1397,7 @@ func (r *Room) StepChickens(now time.Time) {
 	} else if !now.Before(r.nextChickenRainAt) {
 		r.chickenRain(now)
 	}
+	r.stepChickenKing(now)
 	for i := range r.Chickens {
 		c := &r.Chickens[i]
 		if !c.Alive {
@@ -1546,11 +1559,33 @@ func (r *Room) chickenShot(p *PlayerState, origin, dir Vec3, wallDist, playerDis
 	if best == nil {
 		return false
 	}
-	best.Alive = false
-	best.RespawnAt = now.Add(time.Duration(15+rand.IntN(10)) * time.Second)
-	if p.HP < MaxHP {
+	// 金鸡王：多枪才能击杀；命中即给打击反馈（EvHit，客户端有 hitmarker），
+	// 但只有王驾崩才发 EvChickenDeath。击杀奖励：满血 + 满甲 + 弹药大礼包。
+	if best.King {
+		dmg := Weapons[weapon].Dmg
+		dealt := uint16(math.Min(dmg, float64(best.KingHP)))
+		best.KingHP -= dealt
+		r.Emit(Event{Type: EvHit, Player: p.Id, Victim: best.Id, Dmg: uint8(math.Min(dmg, 255))})
+		if best.KingHP > 0 {
+			return true
+		}
+		best.King = false
+		p.HP = MaxHP
+		p.Armor = 100
+		p.grantStreakAmmo()
+		r.nextKingAt = now.Add(kingRespawnMin + time.Duration(rand.IntN(int((kingRespawnMax-kingRespawnMin)/time.Second)))*time.Second)
+		for _, pl := range r.Players {
+			if !pl.IsBot {
+				r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报",
+					Message: fmt.Sprintf("👑 %s 击杀了金鸡王！超级补给到账：满血 + 满甲 + 弹药大礼包", p.Name)})
+				break
+			}
+		}
+	} else if p.HP < MaxHP {
 		p.HP = uint8(min(MaxHP, int(p.HP)+25))
 	}
+	best.Alive = false
+	best.RespawnAt = now.Add(time.Duration(15+rand.IntN(10)) * time.Second)
 	r.chickenKillTitle(p)
 	r.Emit(Event{Type: EvChickenDeath, Killer: p.Id, Victim: best.Id, Origin: best.Pos, Weapon: weapon})
 	return true
@@ -1577,6 +1612,80 @@ func (r *Room) chickenKillTitle(p *PlayerState) {
 			r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报", Message: fmt.Sprintf(title, p.Name)})
 			return
 		}
+	}
+}
+
+// kingChicken 返回在位的金鸡王（可能为 nil）。
+func (r *Room) kingChicken() *Chicken {
+	for i := range r.Chickens {
+		c := &r.Chickens[i]
+		if c.King && c.Alive {
+			return c
+		}
+	}
+	return nil
+}
+
+// stepChickenKing 驱动王的轮回：在位时护卫护送；空位到点则从存活小鸡中随机拥立。
+func (r *Room) stepChickenKing(now time.Time) {
+	if king := r.kingChicken(); king != nil {
+		r.escortGuards(king)
+		return
+	}
+	if r.nextKingAt.IsZero() {
+		r.nextKingAt = now.Add(kingFirstAt)
+		return
+	}
+	if !now.Before(r.nextKingAt) {
+		r.nextKingAt = now.Add(kingRespawnMin + time.Duration(rand.IntN(int((kingRespawnMax-kingRespawnMin)/time.Second)))*time.Second)
+		live := make([]*Chicken, 0, len(r.Chickens))
+		for i := range r.Chickens {
+			if r.Chickens[i].Alive {
+				live = append(live, &r.Chickens[i])
+			}
+		}
+		if len(live) == 0 {
+			return
+		}
+		king := live[rand.IntN(len(live))]
+		king.King = true
+		king.KingHP = kingHP
+		king.forceEmit = true
+		r.Emit(Event{Type: EvChickenSpawn, Player: king.Id, Origin: king.Pos, Dir: king.Dir})
+		for _, pl := range r.Players {
+			if !pl.IsBot {
+				r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报",
+					Message: "👑 金鸡王混入了鸡群！护卫队会暴露它的位置——打爆它：满血 + 满甲 + 弹药大礼包"})
+				break
+			}
+		}
+	}
+}
+
+// escortGuards：离王最近的两只小鸡成为皇家护卫，贴身护送并暴露王的位置。
+func (r *Room) escortGuards(king *Chicken) {
+	first, second := (*Chicken)(nil), (*Chicken)(nil)
+	fd2, sd2 := math.MaxFloat64, math.MaxFloat64
+	for i := range r.Chickens {
+		c := &r.Chickens[i]
+		if !c.Alive || c == king {
+			continue
+		}
+		dx, dz := c.Pos.X-king.Pos.X, c.Pos.Z-king.Pos.Z
+		d2 := dx*dx + dz*dz
+		if d2 < fd2 {
+			second, sd2 = first, fd2
+			first, fd2 = c, d2
+		} else if d2 < sd2 {
+			second, sd2 = c, d2
+		}
+	}
+	for _, g := range []*Chicken{first, second} {
+		if g == nil {
+			continue
+		}
+		g.Home = king.Pos
+		g.Dir = norm(Vec3{king.Pos.X - g.Pos.X, 0, king.Pos.Z - g.Pos.Z})
 	}
 }
 
