@@ -18,9 +18,9 @@ func TestSprintSpeed(t *testing.T) {
 	for range 120 {
 		r.Move(p, now)
 	}
-	base := Hyp(p.Vel.X, p.Vel.Z)
+	base := math.Hypot(p.Vel.X, p.Vel.Z)
 	wantBase := WalkSpeed * Weapons[3].SpeedMult
-	if abs(base-wantBase) > 0.05 {
+	if math.Abs(base-wantBase) > 0.05 {
 		t.Fatalf("walk speed = %.3f, want ~%.3f", base, wantBase)
 	}
 
@@ -29,9 +29,9 @@ func TestSprintSpeed(t *testing.T) {
 	for range 120 {
 		r.Move(p, now)
 	}
-	sprint := Hyp(p.Vel.X, p.Vel.Z)
+	sprint := math.Hypot(p.Vel.X, p.Vel.Z)
 	wantSprint := wantBase * SprintMultiplier
-	if abs(sprint-wantSprint) > 0.05 {
+	if math.Abs(sprint-wantSprint) > 0.05 {
 		t.Fatalf("sprint speed = %.3f, want ~%.3f", sprint, wantSprint)
 	}
 
@@ -40,9 +40,9 @@ func TestSprintSpeed(t *testing.T) {
 	for range 120 {
 		r.Move(p, now)
 	}
-	crouched := Hyp(p.Vel.X, p.Vel.Z)
+	crouched := math.Hypot(p.Vel.X, p.Vel.Z)
 	wantCrouch := wantBase * CrouchSpeed
-	if abs(crouched-wantCrouch) > 0.05 {
+	if math.Abs(crouched-wantCrouch) > 0.05 {
 		t.Fatalf("crouch+shift speed = %.3f, want ~%.3f (冲刺不应作用于蹲伏)", crouched, wantCrouch)
 	}
 
@@ -51,7 +51,7 @@ func TestSprintSpeed(t *testing.T) {
 	for range 120 {
 		r.Move(p, now)
 	}
-	if idle := Hyp(p.Vel.X, p.Vel.Z); idle > 0.01 {
+	if idle := math.Hypot(p.Vel.X, p.Vel.Z); idle > 0.01 {
 		t.Fatalf("idle sprint speed = %.3f, want ~0", idle)
 	}
 }
@@ -91,12 +91,3 @@ func TestBondBreakEventOnRemove(t *testing.T) {
 		t.Fatalf("expected bond-break broadcast to remaining player, pending=%v", r.pending)
 	}
 }
-
-func abs(v float64) float64 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-func Hyp(x, z float64) float64 { return math.Hypot(x, z) }

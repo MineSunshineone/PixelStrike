@@ -315,6 +315,7 @@ func (r *Room) Step(now time.Time) {
 	r.StepChickens(now)
 	r.stepStorm(now)
 	r.stepZones()
+	r.StepWormholes(now)
 	r.recordHistory()
 }
 

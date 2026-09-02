@@ -9,50 +9,53 @@ import (
 )
 
 type Room struct {
-	Id                    int
-	World                 *World
-	Store                 *Store
-	mu                    sync.Mutex
-	running, closed       bool
-	nextHonorReportAt     time.Time
-	Players               []*Player
-	Grenades              []*Grenade
-	Pickups               []Pickup
-	Chickens              []Chicken
-	Zombies               []Zombie
-	bloodMoonUntil        time.Time
-	nextBloodMoonAt       time.Time
-	nextZombieId          uint16
-	zombieWave            uint16
-	zoneOwners            [3]uint16
-	zoneHoldTicks         [3]int
-	bountyOf              map[uint16]uint16
-	nextNadeId, nextIdSeq uint16
-	stormNextAt           time.Time
-	stormEndsAt           time.Time
-	stormNextStrikeAt     time.Time
-	stormStrikePos        Vec3
-	stormStrikesLeft      int
-	stormKind             uint8
-	nextChickenId         uint16
-	nextChickenRainAt     time.Time
-	nextKingAt            time.Time
-	reflecting            bool
-	nextAirdropAt         time.Time
-	airdropSeq            uint16
-	airdropDeadlines      []airdropDeadline
-	tick                  uint32
-	pending               []Event
-	botAIs                map[uint16]*BotAI
-	nextBotChatAt         time.Time
-	history               map[uint16]*poseHistory
-	teamAttempts          map[uint16]*teamAttempt
-	chickenMobTarget      uint16
-	chickenMobUntil       time.Time
-	nextChickenMobAt      time.Time
-	outboundBuf           []outbound
-	quantizedBuf          []quantState
-	djKillCount           uint32
+	Id                            int
+	World                         *World
+	Store                         *Store
+	mu                            sync.Mutex
+	running, closed               bool
+	nextHonorReportAt             time.Time
+	Players                       []*Player
+	Grenades                      []*Grenade
+	Pickups                       []Pickup
+	Chickens                      []Chicken
+	Wormholes                     [2]Vec3
+	wormholeOK, wormholeAnnounced bool
+	wormholeCooldowns             map[uint16]time.Time
+	Zombies                       []Zombie
+	bloodMoonUntil                time.Time
+	nextBloodMoonAt               time.Time
+	nextZombieId                  uint16
+	zombieWave                    uint16
+	zoneOwners                    [3]uint16
+	zoneHoldTicks                 [3]int
+	bountyOf                      map[uint16]uint16
+	nextNadeId, nextIdSeq         uint16
+	stormNextAt                   time.Time
+	stormEndsAt                   time.Time
+	stormNextStrikeAt             time.Time
+	stormStrikePos                Vec3
+	stormStrikesLeft              int
+	stormKind                     uint8
+	nextChickenId                 uint16
+	nextChickenRainAt             time.Time
+	nextKingAt                    time.Time
+	reflecting                    bool
+	nextAirdropAt                 time.Time
+	airdropSeq                    uint16
+	airdropDeadlines              []airdropDeadline
+	tick                          uint32
+	pending                       []Event
+	botAIs                        map[uint16]*BotAI
+	nextBotChatAt                 time.Time
+	history                       map[uint16]*poseHistory
+	teamAttempts                  map[uint16]*teamAttempt
+	chickenMobTarget              uint16
+	chickenMobUntil               time.Time
+	nextChickenMobAt              time.Time
+	outboundBuf                   []outbound
+	quantizedBuf                  []quantState
+	djKillCount                   uint32
 }
 
 // teamAttempt tracks the consecutive crouch taps of one human for illegal teaming.
@@ -68,6 +71,7 @@ func NewRoom(id int, w *World, s *Store) *Room {
 	r := &Room{Id: id, World: w, Store: s, nextIdSeq: 1, botAIs: make(map[uint16]*BotAI), history: make(map[uint16]*poseHistory), teamAttempts: make(map[uint16]*teamAttempt)}
 	r.initPickups()
 	r.initChickens()
+	r.initWormholes()
 	return r
 }
 
@@ -95,6 +99,7 @@ func (r *Room) Remove(p *Player) {
 	}
 	delete(r.botAIs, p.Id)
 	delete(r.history, p.Id)
+	delete(r.wormholeCooldowns, p.Id)
 	for _, other := range r.Players {
 		delete(other.netCache, p.Id)
 		delete(other.netFullAt, p.Id)
@@ -105,6 +110,7 @@ func (r *Room) Remove(p *Player) {
 		r.history = make(map[uint16]*poseHistory)
 		r.Grenades, r.Pickups, r.pending = nil, nil, nil
 		r.Chickens = nil
+		r.wormholeCooldowns = nil
 		return
 	}
 	r.Emit(Event{Type: EvPlayerLeave, Player: p.Id})

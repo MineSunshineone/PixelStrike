@@ -11,6 +11,7 @@ func newAirdropRoom(t *testing.T) *Room {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	r := NewRoom(1, &World{Size: [2]float64{96, 96}, Spawns: [][3]float64{{0, 0, 0}, {20, 0, 20}}}, store)
 	human := newTestHuman(10, r)
 	human.Pos = Vec3{0, 0, 0}

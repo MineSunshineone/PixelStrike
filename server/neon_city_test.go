@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -33,7 +34,7 @@ func TestNeonCityMapAndRevisionSync(t *testing.T) {
 				if b.T == 12 {
 					continue
 				}
-				if pos.X >= b.X && pos.X <= b.X+b.W && pos.Z >= b.Z && pos.Z <= b.Z+b.D && abs(b.Y+b.H-pos.Y) < 0.5 {
+				if pos.X >= b.X && pos.X <= b.X+b.W && pos.Z >= b.Z && pos.Z <= b.Z+b.D && math.Abs(b.Y+b.H-pos.Y) < 0.5 {
 					suspended = false
 					break
 				}
@@ -61,13 +62,6 @@ func TestNeonCityMapAndRevisionSync(t *testing.T) {
 	if uint32(clientRev) != w.Revision {
 		t.Fatalf("revision 两端不一致: 服务端 0x%x vs 客户端 0x%x（重新生成地图后需同步客户端常量）", w.Revision, clientRev)
 	}
-}
-
-func abs(f float64) float64 {
-	if f < 0 {
-		return -f
-	}
-	return f
 }
 
 func readFile(path string) ([]byte, error) {

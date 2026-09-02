@@ -14,7 +14,7 @@ import neonCityMap from '../../maps/neon-city.json';
 // 《霓虹都会》DLC：服务端 Welcome 帧携带 mapRevision（地图文件 sha256 前 4 字节 LE）。
 // 客户端按 revision 选择已内置的地图数据；对不上则回落主地图。
 // 该常量由 tools/genmap-neon.mjs 生成时打印，服务端测试会交叉校验两端一致。
-const NEON_CITY_REVISION = 0x41ea17e1;
+const NEON_CITY_REVISION = 0x3a6b5b4d;
 const pickMapData = (revision: number): MapData => (revision === NEON_CITY_REVISION ? (neonCityMap as MapData) : (bundledMap as MapData));
 
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1204,6 +1204,7 @@ function enterPractice() {
     hud.setMap(map);
     buildZoneBeacons(map, world);
   }
+  disposeWormholes(); // 练习模式没有服务端模拟，虫洞只是摆设，直接不显示
   const map = bundledMap as MapData;
   let spawn: [number, number, number] = map.spawns?.[0] ?? [0, 0, 0];
   if (world && map.spawns) {
@@ -1352,6 +1353,7 @@ hud.onExit = () => {
   if (document.fullscreenElement) void document.exitFullscreen();
   net.disconnect();
   hud.exitMatch();
+  disposeWormholes();
   for (const id of [...remotes.ids()]) remotes.remove(id);
   removeDummies();
   particles.clearBulletHoles();
@@ -1396,6 +1398,7 @@ net.onWelcome = (id, revision) => {
     buildZoneBeacons(map, world);
     for (const [pickupId, pickup] of pickupStates) world.setPickup(pickupId, pickup.kind, ...pickup.origin);
   }
+  buildWormholes();
   names.set(id, myName);
 };
 
@@ -2023,6 +2026,130 @@ remotes.onShot = (s, position, burstShots) => {
 
 remotes.onStep = (position) => playSpatial('step', position.x, position.z, 0.16, 26, 0.92);
 
+// ---------- 《虫洞》DLC：纠缠传送门（选址与 server/wormhole.go 逐位同构） ----------
+const WORMHOLE_VISUAL = {
+  ringRadius: 1.7,
+  swirlRadius: 1.56,
+  centerY: 1.75,
+  colors: [0x4dd8ff, 0xff5fd0],
+  swirlColors: ['#8feaff', '#ffa6ec'],
+};
+
+let wormholeGroup: THREE.Group | null = null;
+const wormholeSwirls: THREE.Mesh[] = [];
+
+// wormholeAnchors 与服务端 wormholePair 同一算法：出生点里挑相距最远、
+// 都能站满人（canOccupy）的一对。遍历顺序只依赖地图 JSON 的出生点数组，
+// 双端读同一份 map.json，选址结果天然一致，无需协议同步。
+function wormholeAnchors(map: MapData): [THREE.Vector3, THREE.Vector3] | null {
+  const spawns = map.spawns ?? [];
+  if (!world || spawns.length < 2) return null;
+  let best = -1;
+  let a: THREE.Vector3 | null = null;
+  let b: THREE.Vector3 | null = null;
+  for (let i = 0; i < spawns.length; i++) {
+    const pi = new THREE.Vector3(spawns[i][0], spawns[i][1], spawns[i][2]);
+    if (!canOccupy(world.boxes, pi, PHYS.standingHeight)) continue;
+    for (let j = i + 1; j < spawns.length; j++) {
+      const pj = new THREE.Vector3(spawns[j][0], spawns[j][1], spawns[j][2]);
+      const dx = pi.x - pj.x;
+      const dz = pi.z - pj.z;
+      const d = dx * dx + dz * dz;
+      if (d > best && canOccupy(world.boxes, pj, PHYS.standingHeight)) {
+        best = d;
+        a = pi.clone();
+        b = pj.clone();
+      }
+    }
+  }
+  return best > 0 && a && b ? [a, b] : null;
+}
+
+function wormholeSwirlTexture(color: string): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 256;
+  const g = canvas.getContext('2d')!;
+  g.translate(128, 128);
+  g.lineCap = 'round';
+  for (let arm = 0; arm < 3; arm++) {
+    g.beginPath();
+    for (let t = 0; t <= 1.0001; t += 0.02) {
+      const ang = arm * (Math.PI * 2 / 3) + t * Math.PI * 3;
+      const r = 10 + t * 112;
+      const x = Math.cos(ang) * r;
+      const y = Math.sin(ang) * r;
+      if (t === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.strokeStyle = color;
+    g.globalAlpha = 0.5;
+    g.lineWidth = 11;
+    g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function disposeWormholes() {
+  if (!wormholeGroup) return;
+  scene.remove(wormholeGroup);
+  wormholeGroup.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry.dispose();
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      if (mat instanceof THREE.MeshBasicMaterial) mat.map?.dispose();
+      mat.dispose();
+    }
+  });
+  wormholeGroup = null;
+  wormholeSwirls.length = 0;
+}
+
+// buildWormholes 在真实对局里构建两扇纠缠门：竖立光环 + 旋转星涡 +
+// 贴地定位环，环面法线指向对门（即穿行方向）。练习模式/离开对局时整体拆除。
+function buildWormholes() {
+  disposeWormholes();
+  if (!world) return;
+  const anchors = wormholeAnchors(bundledMap as MapData);
+  if (!anchors) return;
+  wormholeGroup = new THREE.Group();
+  for (let k = 0; k < 2; k++) {
+    const pos = anchors[k];
+    const other = anchors[1 - k];
+    const portal = new THREE.Group();
+    portal.position.set(pos.x, pos.y + WORMHOLE_VISUAL.centerY, pos.z);
+    portal.lookAt(other.x, pos.y + WORMHOLE_VISUAL.centerY, other.z);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(WORMHOLE_VISUAL.ringRadius, 0.14, 12, 48),
+      new THREE.MeshBasicMaterial({ color: WORMHOLE_VISUAL.colors[k] }),
+    );
+    const swirl = new THREE.Mesh(
+      new THREE.CircleGeometry(WORMHOLE_VISUAL.swirlRadius, 40),
+      new THREE.MeshBasicMaterial({ map: wormholeSwirlTexture(WORMHOLE_VISUAL.swirlColors[k]), transparent: true, side: THREE.DoubleSide, depthWrite: false, opacity: 0.85 }),
+    );
+    const base = new THREE.Mesh(
+      new THREE.TorusGeometry(2.05, 0.05, 8, 48),
+      new THREE.MeshBasicMaterial({ color: WORMHOLE_VISUAL.colors[k], transparent: true, opacity: 0.45 }),
+    );
+    base.rotation.x = Math.PI / 2;
+    base.position.y = -WORMHOLE_VISUAL.centerY + 0.03;
+    portal.add(ring, swirl, base);
+    wormholeGroup.add(portal);
+    wormholeSwirls.push(swirl);
+  }
+  scene.add(wormholeGroup);
+}
+
+function updateWormholes(dt: number) {
+  if (!wormholeGroup) return;
+  for (let i = 0; i < wormholeSwirls.length; i++) {
+    wormholeSwirls[i].rotation.z += (i === 0 ? 1 : -1) * dt * 1.7;
+  }
+}
+
 let prev = performance.now(), lastLabels = 0;
 function frame(t: number) {
   requestAnimationFrame(frame);
@@ -2039,6 +2166,7 @@ function frame(t: number) {
     if (Math.abs((scene.background as THREE.Color).getHex() - DAY_BG_REF.getHex()) < 40) dayBgDirty = false;
   }
   updateAirdropPlane(t);
+  updateWormholes(dt);
 
   if (joined && alive) {
     local.speedMultiplier = (t < speedBoostUntil ? SPEED_BOOST_MULTIPLIER : 1) * (ultimateKind === 3 && t < ultimateUntil ? 1.45 : 1);

@@ -30,8 +30,9 @@ func float32FromBits(b uint32) float64 {
 func newBloodMoonRoom(t *testing.T) *Room {
 	store, err := NewStore(t.TempDir() + "/stats.db")
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	r := NewRoom(1, &World{Size: [2]float64{96, 96}}, store)
 	human := newTestHuman(10, r)
 	human.Pos = Vec3{0, 0, 0}

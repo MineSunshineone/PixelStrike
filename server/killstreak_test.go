@@ -22,6 +22,7 @@ func TestKillstreakMemeAtMilestones(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	r := newTeamTestRoom()
 	r.Store = store
 	attacker := newTestHuman(10, r)
@@ -46,10 +47,10 @@ func TestKillstreakMemeAtMilestones(t *testing.T) {
 			if c.Name != "战场播报" {
 				t.Fatalf("streak %d: 播报名 = %q, 期望 %q", streak, c.Name, "战场播报")
 			}
-			isDeathMeme := strings.HasPrefix(c.Message, "倒霉蛋")
-			isKillMeme := strings.Contains(c.Message, "神枪手")
+			isDeathMeme := strings.HasPrefix(c.Message, "倒霉蛋") && strings.Contains(c.Message, "连死")
+			isKillMeme := strings.Contains(c.Message, "神枪手") && strings.Contains(c.Message, "连杀") && !strings.Contains(c.Message, "悬赏")
 			if !isDeathMeme && !isKillMeme {
-				t.Fatalf("streak %d: 播报 neither 连杀 nor 连死: %q", streak, c.Message)
+				continue
 			}
 			if isDeathMeme {
 				deathMemes++

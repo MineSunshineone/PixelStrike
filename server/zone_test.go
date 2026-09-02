@@ -10,6 +10,7 @@ func newZoneRoom(t *testing.T) *Room {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	// 中央据点 B(0,160) 在本测试世界无墙体；A/C 同理（空世界无阻挡）。
 	r := NewRoom(1, &World{Size: [2]float64{512, 512}}, store)
 	human := newTestHuman(10, r)
@@ -89,6 +90,7 @@ func TestZoneDeadZoneSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	w := &World{Size: [2]float64{512, 512}, Spawns: [][3]float64{{0, 0, 0}}}
 	w.aabbs = append(w.aabbs, AABB{Min: Vec3{X: zoneCenters[1].X - 3, Y: 0, Z: zoneCenters[1].Z - 3}, Max: Vec3{X: zoneCenters[1].X + 3, Y: 8, Z: zoneCenters[1].Z + 3}})
 	r := NewRoom(1, w, store)

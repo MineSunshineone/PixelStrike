@@ -10,6 +10,7 @@ func newAwakenRoom(t *testing.T) *Room {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	r := NewRoom(1, &World{Size: [2]float64{96, 96}}, store)
 	// 测试世界补一块地面 AABB（y: -1~0），否则玩家悬空下坠走空中加速度。
 	r.World.aabbs = append(r.World.aabbs, AABB{Min: Vec3{X: -48, Y: -1, Z: -48}, Max: Vec3{X: 48, Y: 0, Z: 48}})
