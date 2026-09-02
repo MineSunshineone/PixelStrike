@@ -290,6 +290,7 @@ func (r *Room) Step(now time.Time) {
 	}
 	r.StepPickups(now)
 	r.StepChickens(now)
+	r.stepStorm(now)
 	r.recordHistory()
 }
 
@@ -403,6 +404,10 @@ func (r *Room) CheckSanity(p *PlayerState) {
 
 func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick uint32, shotSeq uint16, now time.Time) bool {
 	if !p.Alive || p.Reloading || now.Before(p.NextFire) || !finite(yaw) || !finite(pitch) {
+		return false
+	}
+	// 电磁风暴：枪械间歇性失灵（不耗弹，哑火）。
+	if r.empJam(now) {
 		return false
 	}
 	if p.IsBot && r.AnyBlackDream(now) {
