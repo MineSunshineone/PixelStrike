@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 export const OP = {
   Join: 0x01,
@@ -12,6 +12,7 @@ export const OP = {
   ToggleFlight: 0x0b,
   Ultimate: 0x0c,
   Chat: 0x0d,
+  Hex: 0x0e,
   Welcome: 0x81,
   Snapshot: 0x82,
   Events: 0x83,
@@ -127,6 +128,32 @@ export const ULTIMATES = [
   { id: 6, key: 'N', name: '狂暴', durationMs: 10000, description: '射速 ×2、移速 +30% 共 10 秒' },
 ] as const;
 export const scopeSettleMs = (id: number) => id === 5 ? 320 : id === 11 ? 240 : 0;
+
+// 海克斯强化卡：每条命死亡后 3 选 1（id 与 server/hex.go 的 HexCards 对齐）。
+// 速度/散布/射速系数由本地镜像保证预测与服务端一致。
+export const HEX_CARDS = [
+  { id: 1, name: '疾行者', description: '移速 +15%' },
+  { id: 2, name: '强袭', description: '伤害 +15%' },
+  { id: 3, name: '狂热', description: '射速 +25%' },
+  { id: 4, name: '稳定', description: '散布 -30%' },
+  { id: 5, name: '铁壁', description: '受到伤害 -20%' },
+  { id: 6, name: '利爪', description: '造成伤害 15% 回复生命' },
+  { id: 7, name: '血牛', description: '血量上限 100→140，选卡立即 +40' },
+  { id: 8, name: '弹药扩容', description: '两把武器备弹翻倍' },
+  { id: 9, name: '快手', description: '换弹耗时 -30%' },
+] as const;
+export const hexCard = (id: number) => HEX_CARDS.find((c) => c.id === id);
+export const HEX_SPEED_MULT = 1.15;
+export const HEX_SPREAD_MULT = 0.70;
+export const HEX_FIRE_RATE_DIV = 1.25;
+export const HEX_RELOAD_MULT = 0.70;
+export const HEX_BLOOD_OX_MAX_HP = 140;
+// 卡牌 id（与 server/hex.go 对齐）：客户端预测需要镜像的几张
+export const HEX_SPRINT = 1;
+export const HEX_FRENZY = 3;
+export const HEX_STEADY = 4;
+export const HEX_BLOOD_OX = 7;
+export const HEX_QUICKEN = 9;
 
 // 快捷喊话预设：H 键 / 顶栏 ⚡ 打开，数字键或点按直接以聊天通道发送
 export const QUICK_CHAT_PHRASES = [

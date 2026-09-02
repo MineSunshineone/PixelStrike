@@ -204,6 +204,7 @@ func (h *Hub) Join(p *Player, account, name string, primary, secondary, skin, pr
 	if chickens := room.chickenEvents(); len(chickens) > 0 {
 		p.Send(Events(chickens))
 	}
+	room.offerHex(&p.PlayerState)
 	p.ready = true
 	if !room.running {
 		room.running = true

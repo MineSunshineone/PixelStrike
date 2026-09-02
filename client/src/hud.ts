@@ -1,4 +1,4 @@
-import { QUICK_CHAT_PHRASES, ULTIMATE_REQUIREMENT, ULTIMATES, WEAPONS, type MapData, type PlayerSnap, type RosterEntry } from './constants.js';
+import { hexCard, QUICK_CHAT_PHRASES, ULTIMATE_REQUIREMENT, ULTIMATES, WEAPONS, type MapData, type PlayerSnap, type RosterEntry } from './constants.js';
 import { CharacterPreview } from './preview.js';
 
 function el(id: string): HTMLElement {
@@ -94,7 +94,12 @@ export class Hud {
   onTouchLayoutEdit: (() => void) | null = null;
   onChatSubmit: ((text: string) => void) | null = null;
   onQuickChat: ((text: string) => void) | null = null;
+  onHexPick: ((card: number) => void) | null = null;
   quickChatOpen = false;
+  hexSelectorOpen = false;
+  // 当前展示的 3 张海克斯卡（供数字键 1-3 选中）
+  hexOffer: number[] = [];
+  private hexMaxHp = 100;
   private menu = el('menu');
   private scoreboard = el('scoreboard');
   private settings = el('settings-modal');
@@ -346,6 +351,54 @@ export class Hud {
     if (!selector) return;
     this.ultimateSelectorOpen = force ?? !this.ultimateSelectorOpen;
     selector.style.display = this.ultimateSelectorOpen ? 'flex' : 'none';
+  }
+
+  // ============ 海克斯强化卡 ============
+  showHexCards(cards: number[]) {
+    const wrap = el('hex-cards');
+    const selector = el('hex-selector');
+    if (!wrap || !selector) return;
+    this.hexOffer = cards;
+    wrap.innerHTML = '';
+    cards.forEach((card, i) => {
+      const def = hexCard(card);
+      if (!def) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'hex-card';
+      btn.innerHTML = `<kbd>${i + 1}</kbd><strong>${esc(def.name)}</strong><span>${esc(def.description)}</span>`;
+      btn.addEventListener('click', () => this.onHexPick?.(card));
+      wrap.appendChild(btn);
+    });
+    this.hexSelectorOpen = true;
+    selector.style.display = 'flex';
+  }
+
+  toggleHexSelector(force?: boolean) {
+    const selector = el('hex-selector');
+    if (!selector) return;
+    this.hexSelectorOpen = force ?? !this.hexSelectorOpen;
+    selector.style.display = this.hexSelectorOpen ? 'flex' : 'none';
+  }
+
+  isHexSelectorOpen(): boolean {
+    return this.hexSelectorOpen;
+  }
+
+  setCurrentHex(card: number | null) {
+    const row = el('hex-row');
+    const name = el('hex-name');
+    if (!row || !name) return;
+    const def = card ? hexCard(card) : null;
+    row.style.display = def ? '' : 'none';
+    name.textContent = def ? def.name : '-';
+  }
+
+  // 血牛把上限改到 140：血条按新上限折算百分比
+  setHpMax(max: number) {
+    if (max === this.hexMaxHp) return;
+    this.hexMaxHp = max;
+    this.lastHp = -1; // 强制下次 setHp 重绘
   }
 
   showKillPoint(points: number) {
@@ -840,7 +893,7 @@ export class Hud {
     const hpEl = el('hp');
     if (hpEl) hpEl.textContent = String(v);
     const fillEl = el('hp-bar-fill');
-    if (fillEl) fillEl.style.width = `${Math.max(0, Math.min(100, v))}%`;
+    if (fillEl) fillEl.style.width = `${Math.max(0, Math.min(this.hexMaxHp, v) / this.hexMaxHp * 100)}%`;
     this.root.classList.toggle('low-hp', v > 0 && v <= 30);
   }
 

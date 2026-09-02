@@ -206,8 +206,8 @@ func (r *Room) zombieShot(p *PlayerState, origin, dir Vec3, wallDist, playerDist
 	}
 	best.Alive = false
 	r.Emit(Event{Type: EvZombieDeath, Killer: p.Id, Victim: best.Id, Origin: best.Pos, Weapon: weapon})
-	if p.HP < MaxHP {
-		p.HP = uint8(min(MaxHP, int(p.HP)+zombieKillReward))
+	if int(p.HP) < p.maxHP() {
+		p.HP = uint8(min(p.maxHP(), int(p.HP)+zombieKillReward))
 	}
 	return true
 }

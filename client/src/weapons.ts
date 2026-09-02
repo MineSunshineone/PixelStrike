@@ -135,6 +135,7 @@ export class Weapons {
   nextFireAt = 0;
   ammoLocal = WEAPONS[3].mag;
   reloadStartedAt = 0;
+  reloadDuration = 0;
   reloadingUntil = 0;
   weaponId = 3;
   weaponSkin = 0;
@@ -257,21 +258,23 @@ export class Weapons {
     return t >= this.nextFireAt && t >= this.reloadingUntil && this.ammoLocal > 0;
   }
 
-  startReload(t: number, reserve = 999): boolean {
+  startReload(t: number, reserve = 999, durationMul = 1): boolean {
     const def = WEAPONS[this.weaponId] ?? WEAPONS[0];
     if (this.weaponId === 6 || reserve <= 0 || this.ammoLocal >= def.mag || this.isReloading(t)) return false;
 
+    const dur = def.reloadMs * durationMul;
     this.reloadStartedAt = t;
-    this.reloadingUntil = t + def.reloadMs;
+    this.reloadDuration = dur;
+    this.reloadingUntil = t + dur;
     this.nextFireAt = Math.max(this.nextFireAt, this.reloadingUntil);
 
     // Schedule high-definition synchronized reload sound cues
     const pistolReload = isPistol(this.weaponId);
     const pitch = RELOAD_PITCH[this.weaponId] ?? 1;
     this.scheduledSounds = [
-      { time: t + def.reloadMs * 0.18, name: 'mag_out', vol: 0.75, pitch: pitch * 1.04 },
-      { time: t + def.reloadMs * 0.54, name: 'mag_in', vol: 0.85, pitch },
-      { time: t + def.reloadMs * 0.78, name: pistolReload ? 'reload_click' : 'bolt_cycle', vol: 0.82, pitch: pitch * 0.96 },
+      { time: t + dur * 0.18, name: 'mag_out', vol: 0.75, pitch: pitch * 1.04 },
+      { time: t + dur * 0.54, name: 'mag_in', vol: 0.85, pitch },
+      { time: t + dur * 0.78, name: pistolReload ? 'reload_click' : 'bolt_cycle', vol: 0.82, pitch: pitch * 0.96 },
     ];
 
     return true;
@@ -283,8 +286,7 @@ export class Weapons {
 
   getReloadProgress(t: number): number {
     if (!this.isReloading(t)) return 0;
-    const def = WEAPONS[this.weaponId] ?? WEAPONS[0];
-    const dur = def.reloadMs || 1800;
+    const dur = this.reloadDuration || WEAPONS[this.weaponId]?.reloadMs || 1800;
     return Math.max(0, Math.min(1, (t - this.reloadStartedAt) / dur));
   }
 
@@ -318,9 +320,9 @@ export class Weapons {
     this.curBobY = 0;
   }
 
-  onFired(t: number, intervalOverride?: number) {
+  onFired(t: number, intervalOverride?: number, rateDiv = 1) {
     const def = WEAPONS[this.weaponId] ?? WEAPONS[0];
-    const interval = intervalOverride ?? 60000 / def.rpm;
+    const interval = (intervalOverride ?? 60000 / def.rpm) / rateDiv;
     this.nextFireAt = this.weaponId === 6 ? t + interval : this.nextFireAt > 0 && t - this.nextFireAt < interval ? this.nextFireAt + interval : t + interval;
     if (isSniper(this.weaponId)) {
       this.boltCycleStartedAt = t;

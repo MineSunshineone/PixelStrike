@@ -967,3 +967,25 @@ func TestFlightSnapshotStateBit(t *testing.T) {
 		t.Fatalf("flight state bit missing: %08b", state.state)
 	}
 }
+
+func TestHexEventEncoding(t *testing.T) {
+	b := Events([]Event{
+		{Type: EvHexOffer, Player: 7, Cards: [HexOfferCount]uint8{2, 5, 9}},
+		{Type: EvHexPick, Player: 7, Kind: 5, Name: "测试"},
+	})
+	// 帧头：op + count，事件 22（offer）：player u16 + n u8 + 3×card；
+	// 事件 23（pick）：player u16 + kind u8 + len u8 + name。
+	want := []byte{
+		OpEvents, 2,
+		EvHexOffer, 7, 0, 3, 2, 5, 9,
+		EvHexPick, 7, 0, 5, 6, 230, 181, 139, 232, 175, 149,
+	}
+	if len(b) != len(want) {
+		t.Fatalf("长度 %d, 期望 %d: % x", len(b), len(want), b)
+	}
+	for i := range want {
+		if b[i] != want[i] {
+			t.Fatalf("字节 %d = %d, 期望 %d: % x", i, b[i], want[i], b)
+		}
+	}
+}

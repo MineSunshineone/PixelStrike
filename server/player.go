@@ -333,6 +333,15 @@ func (p *Player) readPump(hub *Hub) {
 				room.CastUltimate(&p.PlayerState, payload[0], now)
 				room.mu.Unlock()
 			}
+		case OpHex:
+			if len(payload) < 1 {
+				continue
+			}
+			if room := p.Room; room != nil {
+				room.mu.Lock()
+				room.HexPick(&p.PlayerState, payload[0], now)
+				room.mu.Unlock()
+			}
 		case OpChat:
 			if !p.joined || len(payload) < 1 {
 				continue

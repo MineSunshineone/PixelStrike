@@ -69,7 +69,7 @@ func (r *Room) stepZones() {
 			if occupant.Ultimate == 0 {
 				occupant.UltimatePoints = uint8(min(UltimateRequirement, int(occupant.UltimatePoints)+zoneRewardUlt))
 			}
-			occupant.HP = uint8(min(MaxHP, int(occupant.HP)+zoneRewardHP))
+			occupant.HP = uint8(min(occupant.maxHP(), int(occupant.HP)+zoneRewardHP))
 			if r.hasZoneAudience() {
 				r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报",
 					Message: fmt.Sprintf("🏛 %s 巩固了 %s 点（+%d 大招点 +%d HP）", occupant.Name, zoneNames[zi], zoneRewardUlt, zoneRewardHP)})

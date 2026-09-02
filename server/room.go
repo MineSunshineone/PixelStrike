@@ -323,6 +323,10 @@ func (r *Room) eventsFor(target *Player, evts []Event) []Event {
 			send = true
 		case EvStreakBuff:
 			send = e.Player == target.Id
+		case EvHexOffer:
+			send = e.Player == target.Id
+		case EvHexPick:
+			send = true
 		case EvHit:
 			send = e.Player == target.Id || e.Victim == target.Id
 		case EvRespawn:
