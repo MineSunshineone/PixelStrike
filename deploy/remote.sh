@@ -37,6 +37,7 @@ rollback() {
     cp docker-compose.yml.ci-rollback docker-compose.yml
     cp "$proxy.ci-rollback" "$proxy"
     docker exec "$openresty" openresty -t && docker exec "$openresty" openresty -s reload || true
+    docker compose unpause || true
     docker compose up -d --no-build --remove-orphans || true
   fi
   rm -f docker-compose.yml.ci-rollback "$proxy.ci-rollback"
@@ -52,6 +53,7 @@ cp docker-compose.prod.yml docker-compose.yml
 cp deploy/1panel-root.conf "$proxy"
 docker exec "$openresty" openresty -t
 docker exec "$openresty" openresty -s reload
+docker compose unpause || true
 docker compose up -d --no-build --remove-orphans --force-recreate
 
 i=0

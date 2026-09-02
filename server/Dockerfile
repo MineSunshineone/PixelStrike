@@ -5,7 +5,7 @@ WORKDIR /app
 # Copy module definitions and pre-download dependencies
 COPY server/go.mod server/go.sum ./server/
 WORKDIR /app/server
-RUN go mod download
+RUN go mod download || (sleep 2 && go mod download) || (sleep 5 && go mod download)
 
 # Copy source and map definition
 WORKDIR /app
