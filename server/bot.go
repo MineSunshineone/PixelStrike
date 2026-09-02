@@ -16,19 +16,21 @@ func botSkill(id uint16) int {
 	return int(id) % (maxBotSkill + 1)
 }
 
+// 整活名单：bot 全员梗化登场。名字带 [BOT] 前缀仅为旧客户端兼容兜底
+// （真人/AI 权威判定走快照状态字节 bit128），长度须与 maxBotCount 容量一致。
 var BotNames = []string{
-	"[BOT] Phoenix",
-	"[BOT] Hunter",
-	"[BOT] Viper",
-	"[BOT] Ghost",
-	"[BOT] Maverick",
-	"[BOT] Raven",
-	"[BOT] Striker",
-	"[BOT] Valkyrie",
-	"[BOT] Apex",
-	"[BOT] Shadow",
-	"[BOT] Frost",
-	"[BOT] Titan",
+	"[BOT] 老六蹲王",
+	"[BOT] 干拉哥",
+	"[BOT] 狙击之神（水）",
+	"[BOT] 鸡圈守护者",
+	"[BOT] 一枪不中",
+	"[BOT] 平底锅侠",
+	"[BOT] 扔雷小能手",
+	"[BOT] 白给战神",
+	"[BOT] 战场氛围组",
+	"[BOT] 疾跑送头侠",
+	"[BOT] 蹲坑艺术家",
+	"[BOT] 菜就多练",
 }
 
 type BotAI struct {
