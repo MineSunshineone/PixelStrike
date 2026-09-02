@@ -67,8 +67,10 @@ const (
 	StopAccel                   = 60.0
 	AirAccel                    = 9.5
 	CrouchSpeed                 = .6
-	Gravity                     = -22.0
-	JumpVel                     = 8.4
+	// 月球跳：重力 -30%、起跳 +25%，跳跃高度 1.6m → ≈3.7m。
+	// 客户端预测常数（client/src/constants.ts 的 PHYS.gravity/jumpVel）必须同步修改。
+	Gravity                     = -15.0
+	JumpVel                     = 10.5
 	MaxRewindTicks              = 8
 	MaxHP                       = 100
 	SpawnProtectS               = 2 * time.Second
