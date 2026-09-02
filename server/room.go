@@ -29,6 +29,8 @@ type Room struct {
 	stormStrikePos        Vec3
 	stormStrikesLeft      int
 	stormKind             uint8
+	nextChickenId         uint16
+	nextChickenRainAt     time.Time
 	tick                  uint32
 	pending               []Event
 	botAIs                map[uint16]*BotAI
