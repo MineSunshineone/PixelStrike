@@ -34,6 +34,7 @@ type Room struct {
 	nextChickenId         uint16
 	nextChickenRainAt     time.Time
 	nextKingAt            time.Time
+	reflecting            bool
 	tick                  uint32
 	pending               []Event
 	botAIs                map[uint16]*BotAI
