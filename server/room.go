@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"math/rand/v2"
 	"sync"
 	"time"
 )
@@ -24,6 +25,7 @@ type Room struct {
 	teamAttempts          map[uint16]*teamAttempt
 	outboundBuf           []outbound
 	quantizedBuf          []quantState
+	djKillCount           uint32
 }
 
 // teamAttempt tracks the consecutive crouch taps of one human for illegal teaming.
@@ -121,6 +123,7 @@ func (r *Room) Run() {
 		r.Step(now)
 		evts := r.pending
 		r.pending = nil
+		r.djOnEvents(evts)
 		needSnap := r.tick%2 == 0
 		var outs []outbound
 		if needSnap || len(evts) > 0 {
@@ -189,6 +192,41 @@ func (r *Room) Run() {
 		recordTick(took)
 		if took > time.Second/TickRate {
 			log.Printf("room %d: slow tick %v", r.Id, took)
+		}
+	}
+}
+
+// 战场 DJ：全房每凑满 15 次击杀（不含自雷），电台整活播报一次。
+const djEveryKills = 15
+
+var djLines = []string{
+	"🎵 下面这首歌送给刚才所有倒地起飞的朋友——《其实都是枪法问题》",
+	"🎵 有观众点播《蹲坑的人最长寿》，送给全场老六",
+	"🎵 刚才的爆炸声是气氛组拉的，请各位继续营业",
+	"🎵 插播寻鸡启事：战场小鸡失踪多只，见到请立即……照看",
+	"🎵 温馨提示：躺平不可耻，可耻的是躺了还被补枪",
+	"🎵 感谢各位老六的倾情演出，冰可乐请到出生点自取",
+}
+
+func (r *Room) djOnEvents(evts []Event) {
+	kills := 0
+	for _, e := range evts {
+		if e.Type == EvKill && e.Killer != e.Victim {
+			kills++
+		}
+	}
+	if kills == 0 {
+		return
+	}
+	r.djKillCount += uint32(kills)
+	if r.djKillCount < djEveryKills {
+		return
+	}
+	r.djKillCount %= djEveryKills
+	for _, p := range r.Players {
+		if !p.IsBot {
+			r.Emit(Event{Type: EvChat, Player: 0, Name: "战场DJ", Message: djLines[rand.IntN(len(djLines))]})
+			break
 		}
 	}
 }
