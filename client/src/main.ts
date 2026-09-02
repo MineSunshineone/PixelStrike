@@ -1436,6 +1436,10 @@ function handleEvent(e: GameEvent) {
     const victimState = states.get(e.victim ?? -1);
     if (victimState) particles.spawnDeath(eventOrigin.set(victimState.x, victimState.y + 0.9, victimState.z), e.headshot === 1);
     else if (e.victim === net.yourId) particles.spawnDeath(eventOrigin.set(local.pos.x, local.pos.y + 0.9, local.pos.z), e.headshot === 1);
+    // 击杀烟花秀：自己完成击杀时在目标位置补一朵彩虹烟花（爆头更大一圈）
+    if (e.killer === net.yourId && e.victim !== net.yourId && victimState) {
+      particles.spawnFirework(eventOrigin.set(victimState.x, victimState.y + 0.9, victimState.z), e.headshot === 1);
+    }
     if (e.victim === net.yourId) audio.play('death', 0.65);
     else if (victimState) playSpatial('death', victimState.x, victimState.z, 0.35, 45);
     const k = roster.get(e.killer ?? -1);

@@ -11,6 +11,7 @@ const FIRE_COLORS = [0xff2200, 0xff5500, 0xff9900, 0xffdd33, 0xfffa88];
 const SMOKE_COLORS = [0x1e1e22, 0x38383e, 0x55555c, 0x777780];
 const DEATH_COLORS = [0x00a8aa, 0x2b3577, 0xd9a377, 0x3a3a3a];
 const FEATHER_COLORS = [0xf2ede0, 0xe4ddc9, 0xd8d0bc, 0xe8a13a];
+const FIREWORK_COLORS = [0xff4d4d, 0xffb84d, 0xffe74d, 0x6dff7c, 0x4dc3ff, 0xb04dff, 0xff4dd2];
 
 interface ParticleData {
   x: number;
@@ -159,6 +160,32 @@ export class ParticleSystem {
         life: 650 + Math.random() * 500,
         size: 1.8 + Math.random() * 2.2,
         gravity: 18,
+      });
+    }
+  }
+
+  // spawnFirework：自己完成击杀时在目标位置炸开一朵彩虹烟花。
+  // big 用于爆头：更大一圈、飞得更高。纯客户端装饰，不参与任何判定。
+  spawnFirework(pos: THREE.Vector3, big = false) {
+    const count = Math.min(big ? 90 : 56, MAX_PARTICLES - this.particles.length);
+    const now = performance.now();
+    for (let i = 0; i < count; i++) {
+      // 球面均匀分布、向上偏置，形成一朵向上炸开的烟花
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const speed = (big ? 5.5 : 4) + Math.random() * (big ? 6 : 4.5);
+      this.particles.push({
+        x: pos.x,
+        y: pos.y + 0.4,
+        z: pos.z,
+        vx: Math.sin(phi) * Math.cos(theta) * speed,
+        vy: Math.abs(Math.cos(phi)) * speed * 0.9 + 2.5,
+        vz: Math.sin(phi) * Math.sin(theta) * speed,
+        color: FIREWORK_COLORS[i % FIREWORK_COLORS.length],
+        born: now,
+        life: 900 + Math.random() * 700,
+        size: 1.6 + Math.random() * 2,
+        gravity: 9,
       });
     }
   }
