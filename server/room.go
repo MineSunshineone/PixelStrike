@@ -37,6 +37,9 @@ type Room struct {
 	nextBotChatAt         time.Time
 	history               map[uint16]*poseHistory
 	teamAttempts          map[uint16]*teamAttempt
+	chickenMobTarget      uint16
+	chickenMobUntil       time.Time
+	nextChickenMobAt      time.Time
 	outboundBuf           []outbound
 	quantizedBuf          []quantState
 	djKillCount           uint32
