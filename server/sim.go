@@ -144,6 +144,7 @@ type PlayerState struct {
 	LastShotAt                                                     time.Time
 	NextChatAt                                                     time.Time
 	ShotCounter                                                    uint8
+	ChickenKills                                                   uint8
 	inputWindowStart                                               time.Time
 	inputCount                                                     int
 }
@@ -1412,8 +1413,33 @@ func (r *Room) chickenShot(p *PlayerState, origin, dir Vec3, wallDist, playerDis
 	if p.HP < MaxHP {
 		p.HP = uint8(min(MaxHP, int(p.HP)+25))
 	}
+	r.chickenKillTitle(p)
 	r.Emit(Event{Type: EvChickenDeath, Killer: p.Id, Victim: best.Id, Origin: best.Pos, Weapon: weapon})
 	return true
+}
+
+// 鸡圈噩梦称号：炸鸡累计到里程碑时全房播报一次（服务端私有计数，零协议改动）。
+var chickenKillTitles = map[uint8]string{
+	10: "🍗 %s 已斩获 10 只小鸡，荣获「鸡圈噩梦」称号！",
+	25: "🏆 %s 炸鸡数达到 25，正式加冕「炸鸡大王」！小鸡们发来抗议信",
+	50: "🚨 %s 的第 50 只小鸡倒下了！禽类保护协会已介入调查",
+}
+
+func (r *Room) chickenKillTitle(p *PlayerState) {
+	if p.ChickenKills == 255 {
+		return
+	}
+	p.ChickenKills++
+	title, ok := chickenKillTitles[p.ChickenKills]
+	if !ok {
+		return
+	}
+	for _, pl := range r.Players {
+		if !pl.IsBot {
+			r.Emit(Event{Type: EvChat, Player: 0, Name: "战场播报", Message: fmt.Sprintf(title, p.Name)})
+			return
+		}
+	}
 }
 
 func (r *Room) ThrowGrenade(p *PlayerState, yaw, pitch float64, now time.Time) {
