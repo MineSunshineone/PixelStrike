@@ -743,8 +743,10 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 			attacker.Streak++
 		}
 		r.applyStreakReward(attacker, now)
+		r.bountySet(attacker)
 	}
 	r.announceKillfeedMemes(attacker, victim)
+	r.bountyClaim(attacker, victim, now)
 	victim.Streak = 0
 	victim.UltimatePoints, victim.Ultimate = 0, 0
 	victim.BlackDreamUntil, victim.InvincibleUntilUlt, victim.GhostUntil = time.Time{}, time.Time{}, time.Time{}

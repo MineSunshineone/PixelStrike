@@ -26,6 +26,7 @@ type Room struct {
 	zombieWave            uint16
 	zoneOwners            [3]uint16
 	zoneHoldTicks         [3]int
+	bountyOf              map[uint16]uint16
 	nextNadeId, nextIdSeq uint16
 	stormNextAt           time.Time
 	stormEndsAt           time.Time
@@ -71,6 +72,9 @@ func NewRoom(id int, w *World, s *Store) *Room {
 }
 
 func (r *Room) Remove(p *Player) {
+	if r.bountyOf != nil {
+		delete(r.bountyOf, p.PlayerState.Id) // 退出房间带走悬赏
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Clear bond: if this player had a bond mate, break the bond and tell the
