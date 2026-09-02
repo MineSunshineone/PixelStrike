@@ -7,7 +7,7 @@ import { Weapons } from './weapons.js';
 import { Hud } from './hud.js';
 import { AudioEngine, type SfxName } from './audio.js';
 import { ParticleSystem } from './particles.js';
-import { KEY, PHYS, WEAPONS, XM_PELLETS, ULTIMATE_REQUIREMENT, QUICK_CHAT_PHRASES, isGun, isPistol, isShotgun, isSniper, scopeSettleMs, type MapData, type PlayerSnap, type RosterEntry, type WeaponDef } from './constants.js';
+import { KEY, PHYS, WEAPONS, XM_PELLETS, ULTIMATE_REQUIREMENT, QUICK_CHAT_PHRASES, hexCard, isGun, isPistol, isShotgun, isSniper, scopeSettleMs, HEX_BLOOD_OX, HEX_BLOOD_OX_MAX_HP, HEX_FRENZY, HEX_FIRE_RATE_DIV, HEX_QUICKEN, HEX_RELOAD_MULT, HEX_SPRINT, HEX_SPEED_MULT, HEX_SPREAD_MULT, HEX_STEADY, type MapData, type PlayerSnap, type RosterEntry, type WeaponDef } from './constants.js';
 import bundledMap from '../../map.json';
 import neonCityMap from '../../maps/neon-city.json';
 
@@ -232,6 +232,8 @@ let ultimatePoints = 0;
 let ultimateKind = 0;
 let ultimateUntil = 0;
 let blackDreamUntil = 0;
+// 海克斯强化卡：本条命生效的卡 id（0 = 无），死亡清零，速度/散布/射速本地镜像与服务端同值
+let selfHexCard = 0;
 let patternShots = 0;
 let lastPatternShot = 0;
 let latencyMs = 0;
@@ -553,7 +555,7 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
 
 
 function startReload(t = performance.now(), notifyServer = true) {
-  if (!alive || activeSlot > 2 || reloadPendingSlot === activeSlot || weapons.isReloading(t) || !weapons.startReload(t, reserve)) return;
+  if (!alive || activeSlot > 2 || reloadPendingSlot === activeSlot || weapons.isReloading(t) || !weapons.startReload(t, reserve, selfHexCard === HEX_QUICKEN ? HEX_RELOAD_MULT : 1)) return;
   reloadPendingSlot = activeSlot;
   reloadPendingMag = weapons.ammoLocal;
   reloadPendingReserve = reserve;
@@ -648,6 +650,14 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     const phrase = QUICK_CHAT_PHRASES[+e.code.at(-1)! - 1];
     if (phrase) hud.onQuickChat?.(phrase);
+    return;
+  }
+  // 海克斯选卡：放在 alive 守卫之前，死亡倒计时期间也能按键选卡（仿快捷喊话条）
+  if (joined && hud.isHexSelectorOpen() && /^Digit[1-3]$/.test(e.code) && !e.repeat) {
+    e.preventDefault();
+    if (hud.isChatComposing()) return;
+    const card = hud.hexOffer[+e.code.at(-1)! - 1];
+    if (card) hud.onHexPick?.(card);
     return;
   }
   if (!joined || interactive) return;
@@ -1727,6 +1737,10 @@ function handleEvent(e: GameEvent) {
       ultimateUntil = 0;
       blackDreamUntil = 0;
       hud.setUltimate(ultimatePoints, ultimateKind);
+      selfHexCard = 0; // 海克斯卡随死亡失效（与服务端死亡结算块同步）
+      hud.setHpMax(100);
+      hud.setCurrentHex(null);
+      hud.toggleHexSelector(false); // 等服务端新一轮 EvHexOffer 重开
       local.flying = false;
       hud.setFlightState(false, false);
       clearCombatInput();
@@ -1832,6 +1846,26 @@ function handleEvent(e: GameEvent) {
     else {
       const s = states.get(e.player ?? -1);
       if (s) playSpatial('reload_click', s.x, s.z, 0.42, 28);
+    }
+    return;
+  }
+  if (e.type === 22 && e.player === net.yourId && e.cards?.length) {
+    // EvHexOffer：新一轮 3 选 1（进房与每次死亡时由服务端发出，仅本人可见）
+    hud.showHexCards(e.cards);
+    return;
+  }
+  if (e.type === 23 && e.kind) {
+    // EvHexPick：全场播报；本人应用效果并关闭选择面板
+    const def = hexCard(e.kind);
+    if (e.player === net.yourId) {
+      selfHexCard = e.kind;
+      hud.setHpMax(e.kind === HEX_BLOOD_OX ? HEX_BLOOD_OX_MAX_HP : 100);
+      hud.setCurrentHex(e.kind);
+      hud.toggleHexSelector(false);
+      audio.play('weapon_switch', 0.85, 1.25);
+      if (def) hud.showPickupNotice(`海克斯：${def.name}`, 'buff');
+    } else if (def) {
+      hud.addChatMessage('战场播报', `🃏 ${e.name ?? nameOf(e.player)} 获得海克斯「${def.name}」`, false);
     }
     return;
   }
@@ -1980,6 +2014,11 @@ hud.onQuickChat = (text) => {
   if (now - lastQuickChatAt < 1200) return;
   lastQuickChatAt = now;
   net.sendChat(text);
+};
+
+hud.onHexPick = (card) => {
+  if (!joined || practice) return;
+  net.sendHexCard(card); // 面板关闭与数值应用以服务端 EvHexPick 回执为准
 };
 
 function nameOf(id?: number): string {
@@ -2169,7 +2208,7 @@ function frame(t: number) {
   updateWormholes(dt);
 
   if (joined && alive) {
-    local.speedMultiplier = (t < speedBoostUntil ? SPEED_BOOST_MULTIPLIER : 1) * (ultimateKind === 3 && t < ultimateUntil ? 1.45 : 1);
+    local.speedMultiplier = (t < speedBoostUntil ? SPEED_BOOST_MULTIPLIER : 1) * (ultimateKind === 3 && t < ultimateUntil ? 1.45 : 1) * (selfHexCard === HEX_SPRINT ? HEX_SPEED_MULT : 1);
     local.keys = keyMask();
     let remaining = dt;
     let landed = false;
@@ -2368,7 +2407,9 @@ function fire(mode: number, t: number) {
   const pellets = Math.max(1, WEAPONS[weapons.weaponId]?.pellets ?? 1);
   const shotSample = (++shotSeq) & 0xff;
   const dir = shotDirection(localShotDir, shotYaw, shotPitch, spread, pellets > 1 ? shotSample * 17 : shotSample, weapons.weaponId, net.yourId);
-  weapons.onFired(t, weapons.weaponId === 6 && (mode & 1) !== 0 ? 1000 : undefined);
+  // 海克斯「狂热」：本地开火节奏镜像服务端 gap/1.25（刀不受影响，与服务端一致）
+  const hexRateDiv = weapons.weaponId !== 6 && selfHexCard === HEX_FRENZY ? HEX_FIRE_RATE_DIV : 1;
+  weapons.onFired(t, weapons.weaponId === 6 && (mode & 1) !== 0 ? 1000 : undefined, hexRateDiv);
   if (!practice) net.sendFire(shotSeq, net.lastServerTick, mode | (aiming ? 0x80 : 0), shotYaw, shotPitch);
   mag = weapons.ammoLocal;
   if (isSniper(weapons.weaponId)) {
@@ -2462,7 +2503,8 @@ function weaponSpread(def: WeaponDef, vx: number, vz: number, onGround: boolean,
 function localSpread(t: number): number {
   const def = WEAPONS[weapons.weaponId];
   const burstShots = t - lastPatternShot <= 420 ? patternShots : 0;
-  let spread = weaponSpread(def, local.vel.x, local.vel.z, local.onGround, local.crouch, t < landingPenaltyUntil, aiming, burstShots);
+  // 海克斯「稳定」：与服务端一致，先乘散布系数再叠加狙击腰射下限
+  let spread = weaponSpread(def, local.vel.x, local.vel.z, local.onGround, local.crouch, t < landingPenaltyUntil, aiming, burstShots) * (selfHexCard === HEX_STEADY ? HEX_SPREAD_MULT : 1);
   if (isSniper(weapons.weaponId) && (!aiming || t - aimStartedAt < scopeSettleMs(weapons.weaponId))) spread = Math.max(spread, def.moveSpread);
   return spread;
 }

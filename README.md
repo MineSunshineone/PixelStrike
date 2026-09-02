@@ -56,6 +56,7 @@ pixel-strike/
 - **羁绊可见**：缔结羁绊时明确播报「你已与谁羁绊」并在 HUD 常驻显示羁绊队友名牌；队友为你挡枪/报仇/心有灵犀时播报会说清是谁为谁；羁绊队友的世界标签为粉色 💕；队友退出会实时提示羁绊解除。
 - **Shift 冲刺**：地面移动中按住 Shift 提速 1.3 倍（蹲伏/飞行时无效，飞行中 Shift 仍是下降）；移动端新增「跑」按钮。
 - **AI 标识权威化**：服务端在快照状态字节（bit128）下发 bot 标识，头顶标签、击杀播报、记分板与聊天的「真人/AI」徽章全部以此为准，bot 与战场小鸡不再因名字未同步而被误标为「真人」。
+- **海克斯强化**：进房与每次阵亡时弹出 3 张强化卡 3 选 1（数字键或点选），效果仅本条命生效、死亡即失效、复活重新选择。当前卡池：疾行者（移速 +15%）、强袭（伤害 +15%）、狂热（射速 +25%）、稳定（散布 -30%）、铁壁（受伤 -20%）、利爪（造成伤害 15% 回血）、血牛（血量上限 100→140）、弹药扩容（备弹翻倍）、快手（换弹 -30%）；bot 不参与。
 
 ## 操作
 
@@ -69,6 +70,7 @@ pixel-strike/
 | `R` / `G` | 换弹 / HE |
 | `T` / `Enter` | 聊天（手机用顶栏 💬 按钮） |
 | `H` | 快捷喊话（手机用顶栏 ⚡ 按钮，数字键/点按发送） |
+| 海克斯面板开启时 `1` / `2` / `3` | 选择强化卡（点选卡片亦可；死亡倒计时期间同样可选） |
 | `Tab` / `Esc` | 战绩 / 设置 |
 | `Esc` → 中国人能飞 | 开关飞行模式，开启时全场广播「玩家名 能飞」 |
 | 飞行中 `Space` / `Shift` | 上升 / 下降（贴地后 `Shift` 不再下降） |
@@ -179,8 +181,9 @@ Compose 已限制服务端 512 MB、静态前端 128 MB，总上限 640 MB。
 
 所有多字节字段均为 Little-Endian。
 
-- 客户端：Join `01`、Input `02`、Fire `03`、Reload `04`、Grenade `06`、Switch `08`、Loadout `09`、RosterRequest `0A`、ToggleFlight `0B`、Ping `F0`。Join 与 Loadout 均携带主、副武器皮肤选择，服务端按解锁进度校验。
+- 客户端：Join `01`、Input `02`、Fire `03`、Reload `04`、Grenade `06`、Switch `08`、Loadout `09`、RosterRequest `0A`、ToggleFlight `0B`、Ultimate `0C`、Chat `0D`、HexPick `0E`（选择海克斯卡）、Ping `F0`。Join 与 Loadout 均携带主、副武器皮肤选择，服务端按解锁进度校验。
 - 服务端：Welcome `81`、Snapshot `82`、Events `83`、Pong `84`、Self `86`、Roster `87`、Reject `88`。
+- 事件：HexOffer（个人，仅发本人：3 张卡 id）/ HexPick（广播：卡 id + 名字）。
 - Snapshot：`tick(u32) + inputAck(u16) + count(u8)`，玩家记录由 `id(u16) + fieldMask(u16)` 开始；`0x8000` 表示完整关键帧，状态包含角色皮肤和当前枪械皮肤。状态字节 bit128 = AI bot（客户端「真人/AI」徽章的权威来源）。
 
-主要实现位置：`server/netstate.go`（带宽）、`server/sim.go`（权威玩法）、`server/room.go`（60 Hz 房间）、`client/src/net.ts`（协议）、`client/src/player.ts`（预测与实例化角色）、`tools/bots.mjs`（压测）。
+主要实现位置：`server/netstate.go`（带宽）、`server/sim.go`（权威玩法）、`server/room.go`（60 Hz 房间）、`server/hex.go`（海克斯强化卡）、`client/src/net.ts`（协议）、`client/src/player.ts`（预测与实例化角色）、`tools/bots.mjs`（压测）。

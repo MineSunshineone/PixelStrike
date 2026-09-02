@@ -889,6 +889,59 @@
       white-space: nowrap;
     }
 
+    /* 海克斯强化卡选择器 */
+    #hex-selector {
+      position: absolute;
+      left: 50%;
+      bottom: 160px;
+      z-index: 46;
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      transform: translateX(-50%);
+      border: 1px solid #8b5cf6;
+      background: linear-gradient(135deg, rgb(28 24 40 / .97), rgb(13 11 20 / .98));
+      padding: 10px 14px;
+      box-shadow: 0 0 36px rgb(139 92 246 / .45);
+      animation: selector-in .15s ease-out;
+    }
+    #hex-selector .selector-label { color: #c4b5fd; }
+    .hex-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      min-width: 96px;
+      padding: 8px 6px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      cursor: pointer;
+      transition: border-color .12s ease, background-color .12s ease;
+      font-family: inherit;
+    }
+    .hex-card:hover { border-color: #a78bfa; background: var(--panel-2); }
+    .hex-card kbd {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      background: var(--ink);
+      color: #c4b5fd;
+      font: 700 14px var(--font-mono);
+    }
+    .hex-card strong {
+      color: var(--paper);
+      font: 700 11px var(--font-ui);
+      white-space: nowrap;
+    }
+    .hex-card span {
+      color: var(--muted);
+      font: 9px var(--font-mono);
+      white-space: nowrap;
+    }
+    #hex-row #hex-name { color: #c4b5fd; }
+
     /* 黑梦全屏遮罩 */
     #black-dream {
       position: fixed;
@@ -2194,6 +2247,10 @@
         <div class="ult-option" data-kind="3"><kbd>V</kbd><strong>幽灵</strong><span>隐身提速 10s</span></div>
       </div>
     </div>
+    <div id="hex-selector" role="dialog" aria-label="选择海克斯强化">
+      <div class="selector-label">海克斯强化 · 数字键 1-3 选卡（本条命生效）</div>
+      <div class="selector-options" id="hex-cards"></div>
+    </div>
     <div id="black-dream" aria-hidden="true"></div>
     <div id="invincible-vignette" aria-hidden="true"></div>
     <div id="ghost-vignette" aria-hidden="true"></div>
@@ -2257,6 +2314,9 @@
       <div class="vital-row">
         <div class="vital-meta"><span><span style="color:#94a3b8;">🛡️</span> ARMOR</span><strong id="armor">100</strong></div>
         <div class="vital-bar-track"><div id="armor-bar-fill" class="vital-bar-fill armor-fill"></div></div>
+      </div>
+      <div class="vital-row" id="hex-row" style="display:none;">
+        <div class="vital-meta"><span><span style="color:#a78bfa;">🃏</span> HEX</span><strong id="hex-name">-</strong></div>
       </div>
     </div>
 

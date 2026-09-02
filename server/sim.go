@@ -152,6 +152,8 @@ type PlayerState struct {
 	ThornsUntil                                                    time.Time
 	LifestealUntil                                                 time.Time
 	RampageUntil                                                   time.Time
+	HexOffer                                                       [HexOfferCount]uint8
+	Hex                                                            uint8
 	inputWindowStart                                               time.Time
 	inputCount                                                     int
 }
@@ -364,6 +366,7 @@ func (r *Room) Move(p *PlayerState, now time.Time) {
 	if now.Before(p.SpeedUntil) {
 		speed *= p.streakSpeedMul()
 	}
+	speed *= p.hexSpeedMul() // 海克斯「疾行者」
 	if p.Crouch {
 		speed *= CrouchSpeed
 	}
@@ -460,6 +463,9 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 	if p.RampageUntil.After(now) {
 		gap /= 2 // 狂暴：射速 ×2
 	}
+	if div := p.hexFireRateDiv(); div > 1 {
+		gap = time.Duration(float64(gap) / div) // 海克斯「狂热」
+	}
 	if weapon == 6 {
 		gap = KnifeSlashInterval
 		if mode&1 != 0 {
@@ -498,6 +504,7 @@ func (r *Room) TryFire(p *PlayerState, yaw, pitch float64, mode uint8, seenTick 
 	spread := 0.0
 	if isGun(uint8(weapon)) {
 		spread = weaponSpread(def, p.Vel.X, p.Vel.Z, p.OnGround, p.Crouch, now.Before(p.LandingUntil), ads, max(0, int(p.ShotCounter)-1))
+		spread *= p.hexSpreadMul() // 海克斯「稳定」
 		settle := AWPScopeTime
 		if weapon == 11 {
 			settle = 240 * time.Millisecond
@@ -695,6 +702,8 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	if now.Before(attacker.DmgUntil) {
 		dmg *= attacker.streakDamageMul()
 	}
+	dmg *= attacker.hexDamageMul() // 海克斯「强袭」
+	dmg *= victim.hexDmgTakenMul() // 海克斯「铁壁」
 	actual := dmg
 	if victim.Armor > 0 && isGun(weapon) {
 		actual = dmg * Weapons[weapon].ArmorPen
@@ -711,7 +720,11 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	}
 	// 吸血：造成伤害回复一半（向下取整）。
 	if attacker.LifestealUntil.After(now) && attacker.Id != victim.Id {
-		attacker.HP = uint8(min(MaxHP, int(attacker.HP)+int(d)/2))
+		attacker.HP = uint8(min(attacker.maxHP(), int(attacker.HP)+int(d)/2))
+	}
+	// 海克斯「利爪」：造成伤害 15% 回复生命。
+	if attacker.Hex == HexLeech && attacker.Id != victim.Id {
+		attacker.HP = uint8(min(attacker.maxHP(), int(attacker.HP)+int(float64(d)*0.15)))
 	}
 	hs := uint8(0)
 	if headshot {
@@ -753,6 +766,7 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	victim.BlackDreamUntil, victim.InvincibleUntilUlt, victim.GhostUntil = time.Time{}, time.Time{}, time.Time{}
 	victim.DmgUntil, victim.RecoilUntil, victim.SpeedUntil = time.Time{}, time.Time{}, time.Time{}
 	victim.ThornsUntil, victim.LifestealUntil, victim.RampageUntil = time.Time{}, time.Time{}, time.Time{}
+	victim.Hex = 0 // 海克斯卡随本条命死亡失效（死亡倒计时期间选的新卡由 HexPick 写入，不受此处影响）
 	if !attacker.IsBot {
 		r.Store.Accumulate(attacker.Account, 1, 0)
 		if !victim.IsBot && isGun(weapon) {
@@ -793,6 +807,7 @@ func (r *Room) Damage(attacker, victim *PlayerState, dmg float64, headshot bool,
 	victim.RevengeActive, victim.RevengeShots = false, 0
 	victim.InvincibleUntil = time.Time{}
 	victim.RespawnAt = now.Add(RespawnDelayS)
+	r.offerHex(victim) // 复活倒计时期间发新一轮 3 选 1
 }
 
 // 连杀梗播报：服务端以「战场播报」身份走 EvChat 通道整活。
@@ -921,7 +936,7 @@ func (p *PlayerState) healPressure() int {
 	if p.HP <= 70 {
 		return 58
 	}
-	if p.HP < MaxHP {
+	if int(p.HP) < p.maxHP() {
 		return 22
 	}
 	if p.Armor <= 15 {
@@ -1005,7 +1020,7 @@ func (r *Room) applyStreakReward(p *PlayerState, now time.Time) {
 			p.grantStreakAmmo()
 			kind |= StreakAmmo
 		case StreakHeal:
-			p.HP = uint8(min(MaxHP, int(p.HP)+healAmt))
+			p.HP = uint8(min(p.maxHP(), int(p.HP)+healAmt))
 			p.Armor = uint8(min(100, int(p.Armor)+min(40, 15+n*4)))
 			kind |= StreakHeal
 		case StreakSpeed:
@@ -1071,10 +1086,11 @@ func (r *Room) StartReload(p *PlayerState, now time.Time) bool {
 	if mag >= def.Mag || reserve <= 0 {
 		return false
 	}
+	reloadMs := int(float64(def.ReloadMs) * p.hexReloadMul()) // 海克斯「快手」
 	p.Reloading = true
-	p.ReloadEnd = now.Add(time.Duration(def.ReloadMs) * time.Millisecond)
+	p.ReloadEnd = now.Add(time.Duration(reloadMs) * time.Millisecond)
 	p.NextFire = p.ReloadEnd
-	r.Emit(Event{Type: EvReloadStart, Player: p.Id, Ms: uint16(def.ReloadMs)})
+	r.Emit(Event{Type: EvReloadStart, Player: p.Id, Ms: uint16(reloadMs)})
 	return true
 }
 
@@ -1095,7 +1111,9 @@ func (r *Room) FinishReloads(now time.Time) {
 func (r *Room) Respawn(p *PlayerState, now time.Time) {
 	p.Pos = r.BestSpawn(p)
 	p.Vel = Vec3{}
-	p.HP = MaxHP
+	// 注意：这里不清 p.Hex——死亡倒计时期间选中的海克斯卡要带入新的一命
+	//（旧卡的失效只发生在 Damage 的死亡结算块）。
+	p.HP = uint8(p.maxHP())
 	p.Armor = 100
 	p.Alive = true
 	p.OnGround, p.Crouch, p.Flying = true, false, false
@@ -1306,15 +1324,15 @@ func applyPickup(p *PlayerState, kind uint8, now time.Time) bool {
 		p.Reserves = [2]int{primary.Reserve, secondary.Reserve}
 		p.Reloading, p.ReloadEnd, p.NextFire = false, time.Time{}, now
 	case PickupHealth:
-		if p.HP >= MaxHP {
+		if int(p.HP) >= p.maxHP() {
 			return false
 		}
-		p.HP = uint8(min(MaxHP, int(p.HP)+50))
+		p.HP = uint8(min(p.maxHP(), int(p.HP)+50))
 	case PickupSpeed:
 		p.SpeedUntil = now.Add(speedBoostDuration)
 	case PickupAirdrop:
 		// 传奇补给：满血满甲弹药全满（大招点奖励由 StepPickups 结算时发放）。
-		p.HP = MaxHP
+		p.HP = uint8(p.maxHP())
 		p.Armor = 100
 		primary, secondary := Weapons[p.Primary], Weapons[p.Secondary]
 		p.Mags = [2]int{primary.Mag, secondary.Mag}
@@ -1643,7 +1661,7 @@ func (r *Room) chickenShot(p *PlayerState, origin, dir Vec3, wallDist, playerDis
 			return true
 		}
 		best.King = false
-		p.HP = MaxHP
+		p.HP = uint8(p.maxHP())
 		p.Armor = 100
 		p.grantStreakAmmo()
 		r.nextKingAt = now.Add(kingRespawnMin + time.Duration(rand.IntN(int((kingRespawnMax-kingRespawnMin)/time.Second)))*time.Second)
@@ -1654,8 +1672,8 @@ func (r *Room) chickenShot(p *PlayerState, origin, dir Vec3, wallDist, playerDis
 				break
 			}
 		}
-	} else if p.HP < MaxHP {
-		p.HP = uint8(min(MaxHP, int(p.HP)+25))
+	} else if int(p.HP) < p.maxHP() {
+		p.HP = uint8(min(p.maxHP(), int(p.HP)+25))
 	}
 	best.Alive = false
 	best.RespawnAt = now.Add(time.Duration(15+rand.IntN(10)) * time.Second)

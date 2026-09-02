@@ -41,7 +41,7 @@ func (r *Room) bountyClaim(attacker, victim *PlayerState, now time.Time) {
 		return
 	}
 	delete(r.bountyOf, victim.Id)
-	attacker.HP = uint8(min(MaxHP, int(attacker.HP)+bountyRewardHP))
+	attacker.HP = uint8(min(attacker.maxHP(), int(attacker.HP)+bountyRewardHP))
 	if !attacker.IsBot && attacker.Ultimate == 0 {
 		attacker.UltimatePoints = uint8(min(UltimateRequirement, int(attacker.UltimatePoints)+bountyRewardUltPts))
 	}

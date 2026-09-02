@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 )
 
-const ProtocolVersion = 10
+const ProtocolVersion = 11
 const SkinCount uint8 = 8
 
 const (
@@ -21,6 +21,7 @@ const (
 	OpToggleFlight  = 0x0B
 	OpUltimate      = 0x0C
 	OpChat          = 0x0D
+	OpHex           = 0x0E
 
 	OpWelcome     = 0x81
 	OpSnapshot    = 0x82
@@ -56,16 +57,20 @@ const (
 	EvChickenDeath
 	EvZombieSpawn
 	EvZombieDeath
+	EvHexOffer
+	EvHexPick
 )
 
 type Event struct {
-	Type                        uint8
-	Killer, Victim, Player      uint16
-	Headshot, Weapon, Dmg, Kind uint8
-	Origin, Dir                 Vec3
-	Ms                          uint16
-	Name                        string
-	Message                     string
+	Type                   uint8
+	Killer, Victim, Player uint16
+	Headshot, Weapon, Dmg  uint8
+	Kind                   uint8
+	Cards                  [HexOfferCount]uint8
+	Origin, Dir            Vec3
+	Ms                     uint16
+	Name                   string
+	Message                string
 }
 
 type Buf struct{ b []byte }
@@ -251,6 +256,18 @@ func Events(evts []Event) []byte {
 			w.U16(e.Victim)
 			w.V3(e.Origin)
 			w.U8(e.Weapon)
+		case EvHexOffer:
+			w.U16(e.Player)
+			w.U8(HexOfferCount)
+			for _, c := range e.Cards {
+				w.U8(c)
+			}
+		case EvHexPick:
+			w.U16(e.Player)
+			w.U8(e.Kind)
+			nb := safeNameBytes(e.Name)
+			w.U8(uint8(len(nb)))
+			w.b = append(w.b, nb...)
 		}
 	}
 	return w.Bytes()
