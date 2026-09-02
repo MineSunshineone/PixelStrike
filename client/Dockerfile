@@ -4,6 +4,7 @@ COPY client/package.json client/package-lock.json ./
 RUN npm ci
 COPY client ./
 COPY map.json /app/map.json
+COPY maps/neon-city.json /app/maps/neon-city.json
 RUN npm run build
 
 FROM nginx:alpine
