@@ -1,4 +1,4 @@
-import { ULTIMATE_REQUIREMENT, ULTIMATES, WEAPONS, type MapData, type PlayerSnap, type RosterEntry } from './constants.js';
+import { QUICK_CHAT_PHRASES, ULTIMATE_REQUIREMENT, ULTIMATES, WEAPONS, type MapData, type PlayerSnap, type RosterEntry } from './constants.js';
 import { CharacterPreview } from './preview.js';
 
 function el(id: string): HTMLElement {
@@ -77,6 +77,8 @@ export class Hud {
   crosshairDot = true;
   crosshairOutline = true;
   crosshairDynamic = true;
+  // 辅助瞄准三档：off=关闭（含桌面默认），normal=触屏默认，strong=强力吸附
+  assistMode: 'off' | 'normal' | 'strong' = 'normal';
   private loadoutPrimary = -1;
   private loadoutSecondary = -1;
   characterPreview: CharacterPreview | null = null;
@@ -91,6 +93,8 @@ export class Hud {
   onSettingsClose: (() => void) | null = null;
   onTouchLayoutEdit: (() => void) | null = null;
   onChatSubmit: ((text: string) => void) | null = null;
+  onQuickChat: ((text: string) => void) | null = null;
+  quickChatOpen = false;
   private menu = el('menu');
   private scoreboard = el('scoreboard');
   private settings = el('settings-modal');
@@ -108,6 +112,9 @@ export class Hud {
   private deathCountdown = el('death-countdown');
   private radar = el('radar') as HTMLCanvasElement;
   private radarBase = document.createElement('canvas');
+  // 雷达点：枪声瞬态 ping（1.5s 扩散消散）+ 常驻标记（小队/羁绊/小鸡）
+  private radarPings: { x: number; z: number; at: number; ally: boolean }[] = [];
+  private radarMarkers: { x: number; z: number; kind: 'ally' | 'bond' | 'chicken' }[] = [];
 
   private map: MapData | null = null;
   private lastRadar = 0;
@@ -423,6 +430,20 @@ export class Hud {
       localStorage.setItem('ps_touch_sens', touchSens.value);
     });
 
+    // 辅助瞄准三档（触屏默认标准；桌面默认关闭，可在设置中打开）
+    const assistSelect = el('assist-mode-select') as HTMLSelectElement | null;
+    const savedAssist = localStorage.getItem('ps_assist');
+    this.assistMode = savedAssist === 'off' || savedAssist === 'normal' || savedAssist === 'strong'
+      ? savedAssist
+      : (matchMedia('(pointer: coarse)').matches ? 'normal' : 'off');
+    if (assistSelect) {
+      assistSelect.value = this.assistMode;
+      assistSelect.addEventListener('change', () => {
+        this.assistMode = (assistSelect.value as 'off' | 'normal' | 'strong') ?? 'normal';
+        localStorage.setItem('ps_assist', this.assistMode);
+      });
+    }
+
 
     vol?.addEventListener('input', () => {
       this.volume = +vol.value / 100;
@@ -577,6 +598,20 @@ export class Hud {
     this.chatInput?.addEventListener('input', () => {
       this.chatInput.value = this.chatInput.value.slice(0, 120);
     });
+
+    // 快捷喊话条：按预设短语生成 chips，点按或数字键发送
+    const quickChat = el('quick-chat');
+    if (quickChat && !quickChat.childElementCount) {
+      QUICK_CHAT_PHRASES.forEach((text, i) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'qc-chip';
+        chip.dataset.idx = String(i);
+        chip.innerHTML = `<kbd>${i + 1}</kbd><span>${esc(text)}</span>`;
+        chip.addEventListener('click', () => this.onQuickChat?.(text));
+        quickChat.appendChild(chip);
+      });
+    }
   }
 
   applyCrosshair() {
@@ -712,6 +747,17 @@ export class Hud {
     this.drawRadar(x, z, yaw, false);
   }
 
+  // 枪声/爆炸在雷达上留一个 1.5 秒的扩散 ping（ally=true 用绿色区分队友枪声）
+  pingRadar(x: number, z: number, ally = false) {
+    this.radarPings.push({ x, z, at: performance.now(), ally });
+    if (this.radarPings.length > 48) this.radarPings.splice(0, this.radarPings.length - 48);
+  }
+
+  // 常驻标记：非法小队 bot（ally）、羁绊队友（bond）、战场小鸡（chicken）
+  setRadarMarkers(markers: { x: number; z: number; kind: 'ally' | 'bond' | 'chicken' }[]) {
+    this.radarMarkers = markers;
+  }
+
   private drawRadar(x: number, z: number, yaw: number, staticOnly: boolean) {
     if (!this.map || !this.radar) return;
     const c = this.radar;
@@ -752,6 +798,40 @@ export class Hud {
     ctx.closePath();
     ctx.fill();
     ctx.restore();
+
+    // 常驻标记：非法小队绿 / 羁绊粉 / 小鸡黄
+    const MARKER_STYLE = { ally: '#8be27e', bond: '#ffb1cd', chicken: '#ffd166' } as const;
+    for (const m of this.radarMarkers) {
+      const mx = (m.x + origin) * scale;
+      const mz = (m.z + origin) * scale;
+      const color = MARKER_STYLE[m.kind];
+      ctx.beginPath();
+      ctx.arc(mx, mz, m.kind === 'chicken' ? 2.2 : 3.2, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 5;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // 枪声/爆炸 ping：扩散圆环渐隐
+    const nowMs = performance.now();
+    this.radarPings = this.radarPings.filter((p) => nowMs - p.at < 1500);
+    for (const p of this.radarPings) {
+      const age = (nowMs - p.at) / 1500;
+      const px = (p.x + origin) * scale;
+      const pz = (p.z + origin) * scale;
+      const rgb = p.ally ? '139, 226, 126' : '244, 63, 94';
+      ctx.beginPath();
+      ctx.arc(px, pz, 3 + age * 10, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${rgb}, ${(1 - age) * 0.85})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(px, pz, 2, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${rgb}, ${(1 - age) * 0.9})`;
+      ctx.fill();
+    }
   }
 
   setHp(v: number) {
@@ -1108,6 +1188,15 @@ export class Hud {
 
   showPause(v: boolean) {
     if (this.pause) this.pause.style.display = v ? 'flex' : 'none';
+  }
+
+  toggleQuickChat(open: boolean) {
+    this.quickChatOpen = open;
+    el('quick-chat')?.classList.toggle('open', open);
+  }
+
+  isQuickChatOpen(): boolean {
+    return this.quickChatOpen;
   }
 
   onPauseClick(fn: () => void) {
