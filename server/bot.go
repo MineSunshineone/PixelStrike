@@ -53,7 +53,18 @@ type BotAI struct {
 	GlanceUntil  time.Time
 	GlanceYaw    float64
 	LastHurtAt   time.Time
+	// 击杀嘲讽：TauntUntil 之前原地转圈庆祝，TauntSpin 为旋转方向（±1）。
+	TauntUntil time.Time
+	TauntSpin  float64
 }
+
+// 嘲讽是可调的整活参数；chance 用 var 方便测试里改成 100%。
+var botTauntChance = 0.4
+
+const (
+	botTauntDuration = 1500 * time.Millisecond
+	botTauntSpinRate = 0.42 // rad per tick，60tick/s ≈ 每秒 4 圈
+)
 
 func (r *Room) SetBotCount(count int) {
 	if count < 0 {
@@ -150,6 +161,15 @@ func (r *Room) StepBots(now time.Time) {
 			ai.Target = nil
 			ai.TargetDist = 0
 			ai.HearUntil = time.Time{}
+			continue
+		}
+
+		// 击杀嘲讽：原地转圈庆祝，期间不动、不开火、不索敌、不换弹。
+		if now.Before(ai.TauntUntil) {
+			p.CmdKeys = 0
+			p.Yaw += ai.TauntSpin * botTauntSpinRate
+			ai.Target = nil
+			ai.TargetDist = 0
 			continue
 		}
 
@@ -477,7 +497,21 @@ func yawToward(cur, want, rate float64) float64 {
 }
 
 func (r *Room) botKilled(victim, killer *PlayerState, now time.Time) {
-	if victim == nil || killer == nil || !victim.IsBot || victim.Id == killer.Id {
+	if victim == nil || killer == nil || victim.Id == killer.Id {
+		return
+	}
+	// 击杀嘲讽：bot 得手后概率原地转圈庆祝（无论 victim 是真人还是 bot）。
+	if killer.IsBot {
+		if kai := r.botAIs[killer.Id]; kai != nil && rand.Float64() < botTauntChance {
+			kai.TauntUntil = now.Add(botTauntDuration)
+			if rand.Float64() < 0.5 {
+				kai.TauntSpin = -1
+			} else {
+				kai.TauntSpin = 1
+			}
+		}
+	}
+	if !victim.IsBot {
 		return
 	}
 	ai := r.botAIs[victim.Id]
