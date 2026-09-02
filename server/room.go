@@ -35,6 +35,9 @@ type Room struct {
 	nextChickenRainAt     time.Time
 	nextKingAt            time.Time
 	reflecting            bool
+	nextAirdropAt         time.Time
+	airdropSeq            uint16
+	airdropDeadlines      []airdropDeadline
 	tick                  uint32
 	pending               []Event
 	botAIs                map[uint16]*BotAI
