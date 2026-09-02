@@ -38,6 +38,19 @@ scene.add(camera);
 const fillLight = new THREE.DirectionalLight(0x789fb0, 0.5);
 fillLight.position.set(-70, 50, 70);
 scene.add(fillLight);
+
+// 蹦迪灯光秀：全场景灯光色相缓慢循环（24s 一轮），亮度/强度恒定——
+// 只转色相不闪频，光敏玩家友好。纯客户端装饰，不影响任何玩法数据。
+const DISCO_PERIOD_MS = 24000;
+function applyDiscoLights(t: number) {
+  const hue = (t % DISCO_PERIOD_MS) / DISCO_PERIOD_MS;
+  sun.color.setHSL(hue, 0.55, 0.62);
+  hemiLight.color.setHSL((hue + 0.5) % 1, 0.4, 0.75);
+  hemiLight.groundColor.setHSL((hue + 0.25) % 1, 0.45, 0.35);
+  fillLight.color.setHSL((hue + 0.33) % 1, 0.5, 0.6);
+  (scene.background as THREE.Color).setHSL(hue, 0.35, 0.5);
+  (scene.fog as THREE.Fog).color.setHSL(hue, 0.35, 0.62);
+}
 const hud = new Hud();
 const audio = new AudioEngine();
 window.addEventListener('pointerdown', () => audio.init(), { once: true, capture: true });
@@ -1920,6 +1933,7 @@ function frame(t: number) {
     particles.update(dt, t, world);
     world?.animate(t);
     weapons.syncFrom(camera);
+    applyDiscoLights(t);
     renderer.render(scene, camera);
     if (alive) weapons.renderOverlay(renderer, scene);
     if (t - lastLabels >= 1000 / 30) {
