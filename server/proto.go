@@ -54,6 +54,8 @@ const (
 	EvChat
 	EvChickenSpawn
 	EvChickenDeath
+	EvZombieSpawn
+	EvZombieDeath
 )
 
 type Event struct {
@@ -236,6 +238,15 @@ func Events(evts []Event) []byte {
 			w.V3(e.Origin)
 			w.V3(e.Dir)
 		case EvChickenDeath:
+			w.U16(e.Killer)
+			w.U16(e.Victim)
+			w.V3(e.Origin)
+			w.U8(e.Weapon)
+		case EvZombieSpawn:
+			w.U16(e.Player)
+			w.V3(e.Origin)
+			w.V3(e.Dir)
+		case EvZombieDeath:
 			w.U16(e.Killer)
 			w.U16(e.Victim)
 			w.V3(e.Origin)

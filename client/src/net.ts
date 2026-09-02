@@ -148,8 +148,10 @@ export class Net {
           o += 4 + nameLen + messageLen; break;
         }
         case 18:
+        case 20:
           e.chicken = v.getUint16(o, true); e.origin = vec(v, o + 2); e.dir = vec(v, o + 14); o += 26; break;
         case 19:
+        case 21:
           e.killer = v.getUint16(o, true); e.chicken = v.getUint16(o + 2, true);
           e.origin = vec(v, o + 4); e.weapon = v.getUint8(o + 16); o += 17; break;
       }
