@@ -314,6 +314,7 @@ func (r *Room) Step(now time.Time) {
 	r.stepAirdrops(now)
 	r.StepChickens(now)
 	r.stepStorm(now)
+	r.stepZones()
 	r.recordHistory()
 }
 

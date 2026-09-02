@@ -24,6 +24,8 @@ type Room struct {
 	nextBloodMoonAt       time.Time
 	nextZombieId          uint16
 	zombieWave            uint16
+	zoneOwners            [3]uint16
+	zoneHoldTicks         [3]int
 	nextNadeId, nextIdSeq uint16
 	stormNextAt           time.Time
 	stormEndsAt           time.Time

@@ -1202,6 +1202,7 @@ function enterPractice() {
     world = new WorldView(scene, map);
     world.clouds.visible = hud.quality !== 'low';
     hud.setMap(map);
+    buildZoneBeacons(map, world);
   }
   const map = bundledMap as MapData;
   let spawn: [number, number, number] = map.spawns?.[0] ?? [0, 0, 0];
@@ -1392,6 +1393,7 @@ net.onWelcome = (id, revision) => {
     worldBuiltFor = map;
     world.clouds.visible = hud.quality !== 'low';
     hud.setMap(map);
+    buildZoneBeacons(map, world);
     for (const [pickupId, pickup] of pickupStates) world.setPickup(pickupId, pickup.kind, ...pickup.origin);
   }
   names.set(id, myName);
@@ -1595,6 +1597,29 @@ function updateAirdropPlane(t: number) {
     return;
   }
   airdropPlane.position.lerpVectors(airdropPlaneFrom, airdropPlaneTo, k);
+}
+
+// ============ 《据点战争》DLC：A/B/C 据点信标 ============
+// 与服务端 zone.go 同位的三个据点；被墙体占用的中心自动跳过。
+const ZONE_CENTERS: [number, number, number][] = [[-96, -96, 0x3de1ff], [0, 160, 0xff4dd2], [96, 96, 0xffd54a]];
+const zoneBeaconBuilt = new Set<MapData>();
+function buildZoneBeacons(map: MapData, worldView: WorldView) {
+  if (zoneBeaconBuilt.has(map)) return;
+  zoneBeaconBuilt.add(map);
+  for (const [x, z, color] of ZONE_CENTERS) {
+    if (!canOccupy(worldView.boxes, new THREE.Vector3(x, 0.1, z), PHYS.standingHeight)) continue;
+    const pole = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 8, 1),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 }),
+    );
+    pole.position.set(x, 4, z);
+    const cap = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 0.8, 2),
+      new THREE.MeshBasicMaterial({ color }),
+    );
+    cap.position.set(x, 8.2, z);
+    scene.add(pole, cap);
+  }
 }
 
 function handleEvent(e: GameEvent) {
