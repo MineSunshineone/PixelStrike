@@ -6,6 +6,8 @@ import "time"
 const (
 	EvKindIllegalJoin  uint8 = 4
 	EvKindIllegalBreak uint8 = 5
+	// 羁绊破裂：配对一方离开房间时通知留守方（Player=留守者，Victim=离开者）。
+	EvKindBondBreak uint8 = 6
 )
 
 // NoteCrouchTap 记录真人玩家的一次下蹲触发沿（抬起后再次按下）。在存活 bot 的

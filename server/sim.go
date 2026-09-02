@@ -61,6 +61,7 @@ const (
 	TickRate                    = 60
 	TickDT                      = 1.0 / TickRate
 	WalkSpeed                   = 6.4
+	SprintMultiplier            = 1.3
 	GroundAccel                 = 44.0
 	StopAccel                   = 60.0
 	AirAccel                    = 9.5
@@ -332,6 +333,10 @@ func (r *Room) Move(p *PlayerState, now time.Time) {
 	}
 	if p.Crouch {
 		speed *= CrouchSpeed
+	}
+	// Shift 冲刺：非飞行、非蹲伏且在移动时生效（飞行中 Shift 是下降）。
+	if k&KeyDescend != 0 && !p.Flying && moving && !p.Crouch {
+		speed *= SprintMultiplier
 	}
 	sin, cos := math.Sin(p.Yaw), math.Cos(p.Yaw)
 	wishX, wishZ := (side*cos-fwd*sin)*speed, (-fwd*cos-side*sin)*speed
@@ -1186,26 +1191,26 @@ type Grenade struct {
 
 const (
 	chickenCount     = 6
-	chickenSpeed     = 1.35                       // units per second
-	chickenStepDist  = chickenSpeed / TickRate    // per-tick travel distance
-	chickenWanderR   = 9.0                        // roam radius around home spawn
-	chickenHitHeight = 0.62                       // AABB height for bullet tests
-	chickenHeartbeat = 5 * time.Second            // max age of an idle chicken's last broadcast
+	chickenSpeed     = 1.35                    // units per second
+	chickenStepDist  = chickenSpeed / TickRate // per-tick travel distance
+	chickenWanderR   = 9.0                     // roam radius around home spawn
+	chickenHitHeight = 0.62                    // AABB height for bullet tests
+	chickenHeartbeat = 5 * time.Second         // max age of an idle chicken's last broadcast
 )
 
 // Battlefield chickens are the classic CS-style easter egg: harmless voxel
 // birds that roam between spawns and pop into fried-chicken rewards when shot.
 type Chicken struct {
-	Id                 uint16
-	Home               Vec3
-	Pos                Vec3
-	Dir                Vec3 // horizontal heading; zero means idling in place
-	Alive              bool
-	NextTurn           time.Time
-	RespawnAt          time.Time
-	lastEmitPos        Vec3
-	lastEmitAt         time.Time
-	forceEmit          bool
+	Id          uint16
+	Home        Vec3
+	Pos         Vec3
+	Dir         Vec3 // horizontal heading; zero means idling in place
+	Alive       bool
+	NextTurn    time.Time
+	RespawnAt   time.Time
+	lastEmitPos Vec3
+	lastEmitAt  time.Time
+	forceEmit   bool
 }
 
 func (r *Room) initChickens() {

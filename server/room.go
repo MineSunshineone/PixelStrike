@@ -45,10 +45,12 @@ func NewRoom(id int, w *World, s *Store) *Room {
 func (r *Room) Remove(p *Player) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Clear bond: if this player had a bond mate, break the bond
+	// Clear bond: if this player had a bond mate, break the bond and tell the
+	// remaining player who they lost（否则羁绊会无声消失）。
 	if p.BondMate != 0 {
 		if mate := r.findPlayer(p.BondMate); mate != nil {
 			mate.BondMate = 0
+			r.Emit(Event{Type: EvBondEvent, Player: mate.Id, Victim: p.Id, Kind: EvKindBondBreak})
 		}
 	}
 	// 离开即解散非法小队，避免残留悬空的队友引用。

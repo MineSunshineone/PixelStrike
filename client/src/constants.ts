@@ -138,6 +138,7 @@ export const KEY = {
 
 export const PHYS = {
   walkSpeed: 6.4,
+  sprintMultiplier: 1.3,
   groundAccel: 44,
   stopAccel: 60,
   airAccel: 9.5,

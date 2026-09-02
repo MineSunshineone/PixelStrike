@@ -499,6 +499,24 @@
       vertical-align: middle;
     }
     .ally-badge { font-size: 11px; margin-left: 4px; vertical-align: middle; }
+    /* 羁绊队友常驻牌：挂在ultimate面板下方，随时能看到和谁羁绊 */
+    #bond-mate {
+      position: absolute;
+      right: 24px;
+      top: 146px;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid rgb(255 158 199 / .55);
+      background: linear-gradient(135deg, rgb(38 20 28 / .94), rgb(20 11 15 / .92));
+      padding: 6px 12px;
+      color: #ffd3e2;
+      font: 700 11px var(--font-mono);
+      z-index: 38;
+      box-shadow: 0 4px 18px rgb(0 0 0 / .5);
+    }
+    #bond-mate.show { display: flex; }
+    #bond-mate .bond-emoji { font-size: 12px; }
     .human-tag {
       color: #34d399;
       font-weight: 800;
@@ -977,6 +995,8 @@
     .player-hp { width: 21px; color: var(--paper); font: 700 9px var(--font-mono); text-align: right; }
     .player-label.ally .player-name { color: #8be27e; }
     .player-label.ally::after { content: '\1F91D'; font-size: 11px; }
+    .player-label.bond .player-name { color: #ffb1cd; }
+    .player-label.bond::after { content: '\1F495'; font-size: 11px; }
 
     #crosshair {
       position: fixed;
@@ -1691,6 +1711,12 @@
       width: 48px;
       height: 48px;
     }
+    #btn-touch-sprint {
+      right: 154px;
+      bottom: 82px;
+      width: 48px;
+      height: 48px;
+    }
     #btn-touch-aim {
       right: 92px;
       bottom: 74px;
@@ -2112,6 +2138,7 @@
       <div class="ultimate-track"><div id="ultimate-fill" class="ultimate-fill"></div></div>
     </div>
     <div id="ultimate-announcement" role="status" aria-live="assertive"></div>
+    <div id="bond-mate" role="status" aria-live="polite"><span class="bond-emoji">💕</span><b id="bond-mate-name"></b></div>
     <div id="ultimate-selector" role="dialog" aria-label="选择大招">
       <div class="selector-label">按数字键选择大招</div>
       <div class="selector-options">
@@ -2229,6 +2256,9 @@
         <button id="btn-touch-score" class="touch-icon-btn" type="button" aria-label="实时战绩">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
         </button>
+        <button id="btn-touch-chat" class="touch-icon-btn" type="button" aria-label="聊天">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>
+        </button>
       </div>
 
       <!-- 左侧移动摇杆 -->
@@ -2259,6 +2289,10 @@
         <button id="btn-touch-jump" class="touch-action-btn" type="button" aria-label="跳跃">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
           <span>跳</span>
+        </button>
+        <button id="btn-touch-sprint" class="touch-action-btn" type="button" aria-label="冲刺">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6l6 6-6 6M13 6l6 6-6 6"/></svg>
+          <span>跑</span>
         </button>
         <button id="btn-touch-fire" class="touch-action-btn fire" type="button" aria-label="开火射击">
           <div class="fire-inner">

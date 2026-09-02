@@ -39,6 +39,10 @@ func quantizeState(p *PlayerState, nowUnixNano int64) quantState {
 	if p.UltimateInvincibleAt(time.Unix(0, nowUnixNano)) {
 		state |= 64
 	}
+	// bit128 = AI bot：让客户端的「真人/AI」徽章不依赖名字前缀。
+	if p.IsBot {
+		state |= 128
+	}
 	return quantState{
 		x: q16(p.Pos.X * 100), y: q16(p.Pos.Y * 100), z: q16(p.Pos.Z * 100),
 		yaw: angleHalfDeg(p.Yaw), pitch: angleHalfDeg(p.Pitch),
