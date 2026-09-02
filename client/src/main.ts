@@ -8,6 +8,13 @@ import { AudioEngine, type SfxName } from './audio.js';
 import { ParticleSystem } from './particles.js';
 import { KEY, PHYS, WEAPONS, XM_PELLETS, ULTIMATE_REQUIREMENT, QUICK_CHAT_PHRASES, isGun, isPistol, isShotgun, isSniper, scopeSettleMs, type MapData, type PlayerSnap, type RosterEntry, type WeaponDef } from './constants.js';
 import bundledMap from '../../map.json';
+import neonCityMap from '../../maps/neon-city.json';
+
+// 《霓虹都会》DLC：服务端 Welcome 帧携带 mapRevision（地图文件 sha256 前 4 字节 LE）。
+// 客户端按 revision 选择已内置的地图数据；对不上则回落主地图。
+// 该常量由 tools/genmap-neon.mjs 生成时打印，服务端测试会交叉校验两端一致。
+const NEON_CITY_REVISION = 0x41ea17e1;
+const pickMapData = (revision: number): MapData => (revision === NEON_CITY_REVISION ? (neonCityMap as MapData) : (bundledMap as MapData));
 
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsUrl = import.meta.env.VITE_WS_URL || `${proto}//${location.host}/ws`;
@@ -91,6 +98,7 @@ const particles = new ParticleSystem(scene);
 const weapons = new Weapons(camera, scene);
 weapons.onPlaySound = (name, vol, pitch) => audio.play(name, vol, pitch);
 let world: WorldView | null = null;
+let worldBuiltFor: MapData | null = null;
 let joined = false;
 let practice = false;
 let alive = false;
@@ -1266,7 +1274,11 @@ hud.onSettingsClose = () => {
   if (joined && alive) void captureGame();
 };
 
-net.onWelcome = (id, _revision) => {
+net.onWelcome = (id, revision) => {
+  const map = pickMapData(revision);
+  if (map !== (bundledMap as MapData) && world && worldBuiltFor !== map) {
+    hud.addChatMessage('系统', '🌃 本服务器运行《霓虹都会》：请刷新页面加载新地图', false);
+  }
   if (joined) {
     for (const playerId of [...remotes.ids()]) remotes.remove(playerId);
     states.clear();
@@ -1284,8 +1296,8 @@ net.onWelcome = (id, _revision) => {
   lastSentInputKeys = -1;
   hud.hideDisconnect();
   if (!world) {
-    const map = bundledMap as MapData;
     world = new WorldView(scene, map);
+    worldBuiltFor = map;
     world.clouds.visible = hud.quality !== 'low';
     hud.setMap(map);
     for (const [pickupId, pickup] of pickupStates) world.setPickup(pickupId, pickup.kind, ...pickup.origin);
